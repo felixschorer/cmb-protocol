@@ -1,9 +1,9 @@
 import asyncio
-import sys
+import secrets
 from asyncio import DatagramProtocol
 from functools import partial
 
-from packets.hello import Hello, Greeting, Subject
+from packets import ResourceRequest
 
 
 class ClientProtocol(DatagramProtocol):
@@ -11,16 +11,18 @@ class ClientProtocol(DatagramProtocol):
         self.loop = loop
 
     def connection_made(self, transport):
-        hello = Hello(greeting=Greeting.HELLO, subject=Subject.WORLD)
-        transport.sendto(hello.to_bytes())
-        transport.close()
+        resource_request = ResourceRequest(connection_id=secrets.token_bytes(16),
+                                           resource_id=secrets.token_bytes(16),
+                                           offset=0)
+        transport.sendto(resource_request.to_bytes())
 
+        transport.close()
 
     def connection_lost(self, _):
         self.loop.stop()
 
 
-def main(argv):
+def main():
     loop = asyncio.get_event_loop()
     client = partial(ClientProtocol, loop)
 
@@ -33,4 +35,4 @@ def main(argv):
 
 
 if __name__ == '__main__':
-    main(sys.argv)
+    main()
