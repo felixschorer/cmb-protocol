@@ -1,11 +1,13 @@
 # CMB Protocol
 ## Installation
+Makes sure Python is installed in version 3.6 or higher.
+
 ### Create a new virtual environment
 ```
 $ python3 -m venv venv
 ```
 
-Make sure `python3-venv` is installed in case creating the virtual environment fails.
+In case creating the virtual environment fails make sure `python3-venv` is installed.
 ```
 $ sudo apt-get update
 $ sudo apt-get install python3-venv
@@ -19,19 +21,6 @@ $ source venv/bin/activate
 ### Installing dependencies
 ```
 (venv) $ pip3 install requirements.txt
-```
-
-`pycapnp` requires a C++ compiler to be installed on the system.
-`build-essential` contains a suitable compiler.
-```
-$ sudo apt-get update
-$ sudo apt-get install build-essential
-```
-
-If the compilation `pycapnp` of fails due to `Python.h` missing, install `python3-dev`.
-```
-$ sudo apt-get update
-$ sudo apt-get install python3-dev
 ```
 
 ## Running server and client

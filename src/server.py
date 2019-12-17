@@ -1,16 +1,13 @@
 import asyncio
-import capnp
 from asyncio import DatagramProtocol
 
-
-capnp.remove_import_hook()
-hello_capnp = capnp.load('../capnp/hello.capnp')
+from packets.hello import Hello
 
 
 class ServerProtocol(DatagramProtocol):
     def datagram_received(self, data, addr):
-        hello = hello_capnp.Hello.from_bytes_packed(data)
-        print(hello.message)
+        hello = Hello.from_bytes(data)
+        print(str(hello))
 
 
 def main():
