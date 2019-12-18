@@ -17,7 +17,7 @@ class ClientProtocol(DatagramProtocol):
         transport.close()
 
     def connection_lost(self, _):
-        self.complete_future.done()
+        self.complete_future.set_result(None)
 
 
 def main():
