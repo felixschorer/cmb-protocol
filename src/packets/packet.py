@@ -7,15 +7,21 @@ class _PacketMeta(ABCMeta):
     Metaclass for reading the _packet_type_ field of packet class definitions.
     """
 
+    _PACKET_TYPE_KEY = '_packet_type_'
     _PACKET_TYPE_FORMAT = '!H'
     PACKET_TYPE_SIZE = struct.calcsize(_PACKET_TYPE_FORMAT)
 
     def __init__(cls, name, bases, dct):
-        if ABC not in bases:
-            cls.packet_type = struct.pack(cls._PACKET_TYPE_FORMAT, dct['_packet_type_'])
-        else:
-            cls.packet_type = None
         super(_PacketMeta, cls).__init__(name, bases, dct)
+
+        if ABC in bases:
+            cls.packet_type = None
+        else:
+            try:
+                cls.packet_type = struct.pack(cls._PACKET_TYPE_FORMAT, dct[cls._PACKET_TYPE_KEY])
+            except (KeyError, struct.error) as e:
+                msg = f'{cls.__module__}.{cls.__name__} must have a valid class member {cls._PACKET_TYPE_KEY}'
+                raise AssertionError(msg) from e
 
 
 class Packet(ABC, metaclass=_PacketMeta):

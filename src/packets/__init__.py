@@ -24,9 +24,6 @@ class PacketType(Enum):
     def parse(self, data):
         return self._packet_cls.from_bytes(data)
 
-    def new(self, *args, **kwargs):
-        return self._packet_cls(*args, **kwargs)
-
 
 def parse(data):
     packet_type = Packet.extract_packet_type(data)
