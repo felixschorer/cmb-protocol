@@ -191,14 +191,14 @@ dependencies = [
 [[package]]
 name = "raptorq"
 version = "0.11.1"
-source = "git+https://github.com/felixschorer/raptorq.git?branch=fix-trying-to-apply-padding-when-no-padding-is-required#7c9021ff4a19c813188cb7b182690c2b7016fc7d"
+source = "git+https://github.com/cberner/raptorq.git?rev=336560db4a7d2d53299c4fc524ce8a0e777a7aad#336560db4a7d2d53299c4fc524ce8a0e777a7aad"
 
 [[package]]
 name = "raptorq-py"
 version = "0.1.0"
 dependencies = [
  "pyo3 0.8.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "raptorq 0.11.1 (git+https://github.com/felixschorer/raptorq.git?branch=fix-trying-to-apply-padding-when-no-padding-is-required)",
+ "raptorq 0.11.1 (git+https://github.com/cberner/raptorq.git?rev=336560db4a7d2d53299c4fc524ce8a0e777a7aad)",
 ]
 
 [[package]]
@@ -310,7 +310,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum pyo3-derive-backend 0.8.4 (registry+https://github.com/rust-lang/crates.io-index)" = "9f6e56fb3e97b344a8f87d036f94578399402c6b75949de6270cd07928f790b1"
 "checksum pyo3cls 0.8.4 (registry+https://github.com/rust-lang/crates.io-index)" = "97452dcdf5941627ebc5c06664a07821fc7fc88d7515f02178193a8ebe316468"
 "checksum quote 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "053a8c8bcc71fcce321828dc897a98ab9760bef03a4fc36693c231e5b3216cfe"
-"checksum raptorq 0.11.1 (git+https://github.com/felixschorer/raptorq.git?branch=fix-trying-to-apply-padding-when-no-padding-is-required)" = "<none>"
+"checksum raptorq 0.11.1 (git+https://github.com/cberner/raptorq.git?rev=336560db4a7d2d53299c4fc524ce8a0e777a7aad)" = "<none>"
 "checksum regex 1.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "dc220bd33bdce8f093101afe22a037b8eb0e5af33592e6a9caafff0d4cb81cbd"
 "checksum regex-syntax 0.6.12 (registry+https://github.com/rust-lang/crates.io-index)" = "11a7e20d1cce64ef2fed88b66d347f88bd9babb82845b2b858f3edbf59a4f716"
 "checksum ryu 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "bfa8506c1de11c9c4e4c38863ccbe02a305c8188e85a05a784c9e11e1c3910c8"
