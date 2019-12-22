@@ -1,18 +1,13 @@
 import asyncio
 from asyncio import DatagramProtocol
 
-from packets import parse, ResourceRequest
+from packets import parse
 
 
 class ServerProtocol(DatagramProtocol):
     def datagram_received(self, data, addr):
         packet = parse(data)
-
         print(packet)
-
-        if isinstance(packet, ResourceRequest):
-            print('Connection ID', packet.connection_id)
-            print('Resource ID', packet.resource_id)
 
 
 def main():
