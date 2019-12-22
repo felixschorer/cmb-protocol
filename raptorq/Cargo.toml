@@ -9,7 +9,9 @@ name = "raptorq"
 crate-type = ["cdylib"]
 
 [dependencies.raptorq]
-version = "0.11.1"
+git = "https://github.com/felixschorer/raptorq.git"
+branch = "fix-trying-to-apply-padding-when-no-padding-is-required"
+#version = "0.11.1"
 
 [dependencies.pyo3]
 version = "0.8.4"
