@@ -9,9 +9,7 @@ name = "raptorq"
 crate-type = ["cdylib"]
 
 [dependencies.raptorq]
-git = "https://github.com/cberner/raptorq.git"
-rev = "336560db4a7d2d53299c4fc524ce8a0e777a7aad"
-#version = "0.11.2"
+version = "1.0.0"
 
 [dependencies.pyo3]
 version = "0.8.4"
