@@ -7,17 +7,20 @@ from .packets import ResourceRequest
 
 class ClientProtocol(DatagramProtocol):
     def __init__(self):
-        self.complete_future = Future()
+        self._complete_future = Future()
 
     def connection_made(self, transport):
         resource_request = ResourceRequest(connection_id=secrets.token_bytes(16),
                                            resource_id=secrets.token_bytes(16),
                                            blob_offset=0)
         transport.sendto(resource_request.to_bytes())
-        transport.close()
+        asyncio.get_event_loop().call_soon(transport.close)
 
     def connection_lost(self, _):
-        self.complete_future.set_result(None)
+        self._complete_future.set_result(None)
+
+    def __await__(self):
+        return self._complete_future.__await__()
 
 
 def main():
@@ -26,7 +29,7 @@ def main():
     connect = loop.create_datagram_endpoint(ClientProtocol, remote_addr=('127.0.0.1', 9999))
     transport, protocol = loop.run_until_complete(connect)
 
-    loop.run_until_complete(protocol.complete_future)
+    loop.run_until_complete(protocol)
     loop.close()
 
 
