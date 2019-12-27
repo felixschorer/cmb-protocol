@@ -1,7 +1,7 @@
 from enum import Enum, unique
 
-from packets.packet import Packet
-from packets.resource_request import ResourceRequest
+from .packet import Packet
+from .resource_request import ResourceRequest
 
 
 @unique

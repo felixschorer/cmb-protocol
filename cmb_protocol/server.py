@@ -1,7 +1,7 @@
 import asyncio
 from asyncio import DatagramProtocol
 
-from packets import parse
+from .packets import parse
 
 
 class ServerProtocol(DatagramProtocol):

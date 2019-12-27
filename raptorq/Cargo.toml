@@ -1,0 +1,16 @@
+[package]
+name = "raptorq-py"
+version = "0.1.0"
+authors = []
+edition = "2018"
+
+[lib]
+name = "raptorq"
+crate-type = ["cdylib"]
+
+[dependencies.raptorq]
+version = "1.0.0"
+
+[dependencies.pyo3]
+version = "0.8.4"
+features = ["extension-module"]

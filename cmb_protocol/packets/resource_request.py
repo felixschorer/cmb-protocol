@@ -1,5 +1,5 @@
 import struct
-from packets.packet import Packet
+from .packet import Packet
 
 
 class ResourceRequest(Packet):
