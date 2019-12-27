@@ -1,12 +1,12 @@
 import asyncio
 from asyncio import DatagramProtocol
 
-from .packets import parse
+from .packets import PacketType
 
 
 class ServerProtocol(DatagramProtocol):
     def datagram_received(self, data, addr):
-        packet = parse(data)
+        packet = PacketType.parse_packet(data)
         print(packet)
 
 

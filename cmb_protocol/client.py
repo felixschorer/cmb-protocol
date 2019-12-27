@@ -12,7 +12,7 @@ class ClientProtocol(DatagramProtocol):
     def connection_made(self, transport):
         resource_request = ResourceRequest(connection_id=secrets.token_bytes(16),
                                            resource_id=secrets.token_bytes(16),
-                                           offset=0)
+                                           blob_offset=0)
         transport.sendto(resource_request.to_bytes())
         transport.close()
 

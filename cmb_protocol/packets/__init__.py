@@ -2,6 +2,7 @@ from enum import Enum, unique
 
 from .packet import Packet
 from .resource_request import ResourceRequest
+from .data import Data, DataWithObjectTransmissionInfo
 
 
 @unique
@@ -11,6 +12,8 @@ class PacketType(Enum):
     """
 
     RESOURCE_REQUEST = ResourceRequest
+    DATA = Data
+    DATA_WITH_TRANSMISSION_INFO = DataWithObjectTransmissionInfo
 
     def __new__(cls, packet_cls):
         assert issubclass(packet_cls, Packet)
@@ -19,12 +22,9 @@ class PacketType(Enum):
         return obj
 
     def __init__(self, packet_cls):
-        self._packet_cls = packet_cls
+        self.packet_cls = packet_cls
 
-    def parse(self, data):
-        return self._packet_cls.from_bytes(data)
-
-
-def parse(data):
-    packet_type = Packet.extract_packet_type(data)
-    return PacketType(packet_type).parse(data)
+    @classmethod
+    def parse_packet(cls, packet_bytes):
+        packet_type = Packet.extract_packet_type(packet_bytes)
+        return cls(packet_type).packet_cls.from_bytes(packet_bytes)

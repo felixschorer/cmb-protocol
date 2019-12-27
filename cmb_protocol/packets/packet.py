@@ -34,13 +34,13 @@ class Packet(ABC, metaclass=_PacketMeta):
         return type(self).packet_type + self._serialize_fields()
 
     @classmethod
-    def from_bytes(cls, data):
-        assert cls.extract_packet_type(data) == cls.packet_type
-        return cls._parse_fields(data[cls.PACKET_TYPE_SIZE:])
+    def from_bytes(cls, packet_bytes):
+        assert cls.extract_packet_type(packet_bytes) == cls.packet_type
+        return cls._parse_fields(packet_bytes[cls.PACKET_TYPE_SIZE:])
 
     @classmethod
-    def extract_packet_type(cls, data):
-        return data[:cls.PACKET_TYPE_SIZE]
+    def extract_packet_type(cls, packet_bytes):
+        return packet_bytes[:cls.PACKET_TYPE_SIZE]
 
     @abstractmethod
     def _serialize_fields(self):
@@ -51,7 +51,7 @@ class Packet(ABC, metaclass=_PacketMeta):
 
     @classmethod
     @abstractmethod
-    def _parse_fields(cls, data):
+    def _parse_fields(cls, packet_bytes):
         """
         Abstract method for parsing the fields of a packet from bytes (excluding the packet type).
         """
