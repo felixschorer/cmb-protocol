@@ -1,13 +1,18 @@
 import asyncio
 
 from connection import Connection, ProtocolServer
-from packets import PacketType
+from packets import PacketType, RequestResource, DataWithMetadata
 
 
 class ClientConnection(Connection):
     async def handle_packet(self, data):
-        print(PacketType.parse_packet(data))
-        await self.send(data)
+        packet = PacketType.parse_packet(data)
+        print(packet)
+
+        if isinstance(packet, RequestResource):
+            data_with_metadata = DataWithMetadata(block_id=0, fec_data=bytes(10), resource_size=10)
+            await self.send(data_with_metadata.to_bytes())
+
         self.close()
 
 

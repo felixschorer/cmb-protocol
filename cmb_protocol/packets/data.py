@@ -43,7 +43,7 @@ class DataWithMetadata(Data):
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        transfer_length, block_size = struct.unpack(cls.__format, packet_bytes[-cls.__format_size:])
+        transfer_length, = struct.unpack(cls.__format, packet_bytes[-cls.__format_size:])
         data = super()._parse_fields(packet_bytes[:-cls.__format_size])
         return DataWithMetadata(block_id=data.block_id, fec_data=data.fec_data,
                                 resource_size=transfer_length)

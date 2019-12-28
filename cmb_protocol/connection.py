@@ -65,7 +65,8 @@ class ProtocolServer(DatagramProtocol):
             transport = BoundDatagramTransport(self._transport, addr=addr)
             connection = self._connection_factory(transport)
             connection.close_future.add_done_callback(lambda _: self._remove_connection(addr))
-            asyncio.ensure_future(self._init_connection(connection, data))
+            asyncio.ensure_future(connection.init_connection())
+            asyncio.ensure_future(connection.handle_packet(data))
             self._connections[addr] = connection
 
     def pause_writing(self):
@@ -75,11 +76,6 @@ class ProtocolServer(DatagramProtocol):
     def resume_writing(self):
         for connection in self._connections.values():
             connection.resume_writing()
-
-    @staticmethod
-    async def _init_connection(connection, data):
-        await connection.init_connection()
-        await connection.handle_packet(data)
 
     def _remove_connection(self, addr):
         del self._connections[addr]
