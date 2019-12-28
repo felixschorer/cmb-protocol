@@ -1,18 +1,20 @@
 import asyncio
-from asyncio import DatagramProtocol
 
-from cmb_protocol.packets import PacketType
+from connection import Connection, ProtocolServer
+from packets import PacketType
 
 
-class ServerProtocol(DatagramProtocol):
-    def datagram_received(self, data, addr):
-        packet = PacketType.parse_packet(data)
-        print(addr, packet)
+class ClientConnection(Connection):
+    async def handle_packet(self, data):
+        print(PacketType.parse_packet(data))
+        await self.send(data)
+        self.close()
 
 
 def main():
     loop = asyncio.get_event_loop()
-    listen = loop.create_datagram_endpoint(ServerProtocol, local_addr=('127.0.0.1', 9999))
+    listen = loop.create_datagram_endpoint(lambda: ProtocolServer(ClientConnection),
+                                           local_addr=('127.0.0.1', 9999))
     transport, protocol = loop.run_until_complete(listen)
 
     try:
