@@ -1,5 +1,6 @@
 import struct
-from .packet import Packet
+
+from cmb_protocol.packets.packet import Packet
 
 
 class ResourceRequest(Packet):

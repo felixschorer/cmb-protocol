@@ -1,7 +1,7 @@
 import asyncio
 from asyncio import DatagramProtocol
 
-from .packets import PacketType
+from cmb_protocol.packets import PacketType
 
 
 class ServerProtocol(DatagramProtocol):

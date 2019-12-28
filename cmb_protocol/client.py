@@ -2,7 +2,7 @@ import asyncio
 import secrets
 from asyncio import DatagramProtocol, Future
 
-from .packets import ResourceRequest
+from cmb_protocol.packets import ResourceRequest
 
 
 class ClientProtocol(DatagramProtocol):
