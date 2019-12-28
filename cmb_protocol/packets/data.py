@@ -27,23 +27,23 @@ class Data(Packet):
 
 
 class DataWithMetadata(Data):
-    __slots__ = 'transfer_length'
+    __slots__ = 'resource_size',
 
     _packet_type_ = 0xcb02
 
     __format = '!Q'
     __format_size = struct.calcsize(__format)
 
-    def __init__(self, block_id, fec_data, transfer_length):
+    def __init__(self, block_id, fec_data, resource_size):
         super().__init__(block_id, fec_data)
-        self.transfer_length = transfer_length
+        self.resource_size = resource_size
 
     def _serialize_fields(self):
-        return super()._serialize_fields() + struct.pack(self.__format, self.transfer_length)
+        return super()._serialize_fields() + struct.pack(self.__format, self.resource_size)
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
         transfer_length, block_size = struct.unpack(cls.__format, packet_bytes[-cls.__format_size:])
         data = super()._parse_fields(packet_bytes[:-cls.__format_size])
         return DataWithMetadata(block_id=data.block_id, fec_data=data.fec_data,
-                                transfer_length=transfer_length)
+                                resource_size=transfer_length)

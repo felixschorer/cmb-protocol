@@ -3,7 +3,7 @@ import struct
 from cmb_protocol.packets.packet import Packet
 
 
-class ResourceRequest(Packet):
+class RequestResource(Packet):
     __slots__ = 'overhead', 'resource_id', 'block_offset'
 
     _packet_type_ = 0xcb00
@@ -23,4 +23,4 @@ class ResourceRequest(Packet):
     @classmethod
     def _parse_fields(cls, packet_bytes):
         overhead, reserved, resource_id, block_offset = struct.unpack(cls.__format, packet_bytes)
-        return ResourceRequest(overhead=overhead, resource_id=resource_id, block_offset=block_offset)
+        return RequestResource(overhead=overhead, resource_id=resource_id, block_offset=block_offset)

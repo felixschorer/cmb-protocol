@@ -1,7 +1,7 @@
 from enum import Enum, unique
 
 from cmb_protocol.packets.packet import Packet
-from cmb_protocol.packets.resource_request import ResourceRequest
+from cmb_protocol.packets.request_resource import RequestResource
 from cmb_protocol.packets.data import Data, DataWithMetadata
 from cmb_protocol.packets.ack import AckBlock, AckMetadata
 from cmb_protocol.packets.nack import NackBlock
@@ -13,7 +13,7 @@ class PacketType(Enum):
     Enum for defining all possible packet types.
     """
 
-    RESOURCE_REQUEST = ResourceRequest
+    REQUEST_RESOURCE = RequestResource
     DATA = Data
     DATA_WITH_METADATA = DataWithMetadata
     ACK_BLOCK = AckBlock
