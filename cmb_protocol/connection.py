@@ -1,12 +1,28 @@
 import asyncio
+from abc import ABC, abstractmethod
 from asyncio import Future, DatagramProtocol
 
 
-class Connection:
+class BoundTransport(ABC):
+    @abstractmethod
+    def send(self, data):
+        pass
+
+
+class BoundDatagramTransport(BoundTransport):
     def __init__(self, datagram_transport, addr=None):
-        self.addr = addr
+        super().__init__()
+        self._datagram_transport = datagram_transport
+        self._addr = addr
+
+    def send(self, data):
+        self._datagram_transport.sendto(data, addr=self._addr)
+
+
+class Connection:
+    def __init__(self, transport):
         self.close_future = Future()
-        self.__datagram_transport = datagram_transport
+        self.__transport = transport
         self.__resume_writing_future = None
 
     async def init_connection(self):
@@ -18,7 +34,7 @@ class Connection:
     async def send(self, packet):
         if self.__resume_writing_future is not None:
             await self.__resume_writing_future
-        self.__datagram_transport.sendto(packet, self.addr)
+        self.__transport.send(packet)
 
     def pause_writing(self):
         if self.__resume_writing_future is None:
@@ -44,14 +60,13 @@ class ProtocolServer(DatagramProtocol):
     def datagram_received(self, data, addr):
         if addr in self._connections:
             connection = self._connections[addr]
+            asyncio.ensure_future(connection.handle_packet(data))
         else:
-            connection = self._connection_factory(self._transport, addr=addr)
+            transport = BoundDatagramTransport(self._transport, addr=addr)
+            connection = self._connection_factory(transport)
             connection.close_future.add_done_callback(lambda _: self._remove_connection(addr))
-            asyncio.ensure_future(connection.close_future)
-            asyncio.ensure_future(connection.init_connection())
+            asyncio.ensure_future(self._init_connection(connection, data))
             self._connections[addr] = connection
-
-        asyncio.ensure_future(connection.handle_packet(data))
 
     def pause_writing(self):
         for connection in self._connections.values():
@@ -60,6 +75,11 @@ class ProtocolServer(DatagramProtocol):
     def resume_writing(self):
         for connection in self._connections.values():
             connection.resume_writing()
+
+    @staticmethod
+    async def _init_connection(connection, data):
+        await connection.init_connection()
+        await connection.handle_packet(data)
 
     def _remove_connection(self, addr):
         del self._connections[addr]
@@ -72,7 +92,7 @@ class ProtocolClient(DatagramProtocol):
         self._connection = None
 
     def connection_made(self, transport):
-        self._connection = self._connection_factory(transport)
+        self._connection = self._connection_factory(BoundDatagramTransport(transport))
         self._connection.close_future.add_done_callback(lambda _: transport.close())
         asyncio.ensure_future(self._connection.close_future)
         asyncio.ensure_future(self._connection.init_connection())
