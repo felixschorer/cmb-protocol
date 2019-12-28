@@ -7,7 +7,7 @@ from cmb_protocol.packets import PacketType
 class ServerProtocol(DatagramProtocol):
     def datagram_received(self, data, addr):
         packet = PacketType.parse_packet(data)
-        print(packet)
+        print(addr, packet)
 
 
 def main():

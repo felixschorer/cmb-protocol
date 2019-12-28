@@ -10,9 +10,7 @@ class ClientProtocol(DatagramProtocol):
         self._complete_future = Future()
 
     def connection_made(self, transport):
-        resource_request = ResourceRequest(connection_id=secrets.token_bytes(16),
-                                           resource_id=secrets.token_bytes(16),
-                                           blob_offset=0)
+        resource_request = ResourceRequest(overhead=0, resource_id=secrets.token_bytes(16), blob_offset=0)
         transport.sendto(resource_request.to_bytes())
         asyncio.get_event_loop().call_soon(transport.close)
 

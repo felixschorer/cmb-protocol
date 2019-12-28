@@ -4,28 +4,34 @@ from cmb_protocol.packets.packet import Packet
 
 
 class AckBlock(Packet):
+    __slots__ = 'block_id'
+
     _packet_type_ = 0xcb03
 
-    def __init__(self):
+    __format = '!2sQ'
+
+    def __init__(self, block_id):
         super().__init__()
+        self.block_id = block_id
 
     def _serialize_fields(self):
-        return b''
+        return struct.pack(self.__format, bytes(2), self.block_id)
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        return AckBlock()
+        reserved, block_id, = struct.unpack(cls.__format, packet_bytes)
+        return AckBlock(block_id=block_id)
 
 
-class AckTransmissionMetadata(Packet):
+class AckMetadata(Packet):
     _packet_type_ = 0xcb04
 
     def __init__(self):
         super().__init__()
 
     def _serialize_fields(self):
-        return b''
+        return bytes(2)
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        return AckTransmissionMetadata()
+        return AckMetadata()
