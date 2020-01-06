@@ -36,7 +36,9 @@ class ServerConnection(Connection):
 
 
 def main():
-    loop = asyncio.get_event_loop()
+    loop = asyncio.SelectorEventLoop()
+    asyncio.set_event_loop(loop)
+
     connect = loop.create_datagram_endpoint(lambda: ProtocolClient(ServerConnection),
                                             remote_addr=('127.0.0.1', 9999))
     transport, protocol = loop.run_until_complete(connect)
