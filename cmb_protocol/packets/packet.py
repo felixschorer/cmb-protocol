@@ -20,7 +20,8 @@ class _PacketMeta(ABCMeta):
             try:
                 cls.packet_type = struct.pack(cls._PACKET_TYPE_FORMAT, dct[cls._PACKET_TYPE_KEY])
             except (KeyError, struct.error) as e:
-                msg = f'{cls.__module__}.{cls.__name__} must have a valid class member {cls._PACKET_TYPE_KEY}'
+                msg = '{}.{} must have a valid class member {}'.format(cls.__module__, cls.__name__,
+                                                                       cls._PACKET_TYPE_KEY)
                 raise AssertionError(msg) from e
 
 

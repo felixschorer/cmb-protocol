@@ -1,7 +1,7 @@
 # CMB Protocol
 ## Installation
 ### Prerequisites
-- [Python](https://www.python.org/downloads/) in version 3.6 or higher
+- [Python](https://www.python.org/downloads/) in version 3.5 or higher
   - check the installed version with `python3 --version`
 - [rustup](https://rustup.rs/) for managing Rust toolchains
 
