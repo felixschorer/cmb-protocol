@@ -1,37 +1,24 @@
-import asyncio
-
-from connection import Connection, ProtocolServer
+import trio
 from packets import PacketType, RequestResource, DataWithMetadata
 
 
-class ClientConnection(Connection):
-    async def handle_packet(self, data):
+async def main():
+    udp_sock = trio.socket.socket(
+        family=trio.socket.AF_INET,   # IPv4
+        type=trio.socket.SOCK_DGRAM,  # UDP
+    )
+
+    await udp_sock.bind(('127.0.0.1', 9999))
+
+    while True:
+        data, address = await udp_sock.recvfrom(2048)
         packet = PacketType.parse_packet(data)
-        print(packet)
+        print(address, packet)
 
         if isinstance(packet, RequestResource):
-            data_with_metadata = DataWithMetadata(block_id=0, fec_data=bytes(10), resource_size=10)
-            await self.send(data_with_metadata.to_bytes())
-
-        self.close()
-
-
-def main():
-    loop = asyncio.SelectorEventLoop()
-    asyncio.set_event_loop(loop)
-
-    listen = loop.create_datagram_endpoint(lambda: ProtocolServer(ClientConnection),
-                                           local_addr=('127.0.0.1', 9999))
-    transport, protocol = loop.run_until_complete(listen)
-
-    try:
-        loop.run_forever()
-    except KeyboardInterrupt:
-        pass
-
-    transport.close()
-    loop.close()
+            data_with_metadata = DataWithMetadata(resource_size=0, block_id=0, fec_data=bytes())
+            await udp_sock.sendto(data_with_metadata.to_bytes(), address)
 
 
 if __name__ == '__main__':
-    main()
+    trio.run(main)
