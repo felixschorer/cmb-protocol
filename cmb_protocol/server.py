@@ -1,24 +1,38 @@
 import trio
+from trio import socket
+from ipaddress import IPv6Address
 from packets import PacketType, RequestResource, DataWithMetadata
 
 
-async def main():
-    udp_sock = trio.socket.socket(
-        family=trio.socket.AF_INET,   # IPv4
-        type=trio.socket.SOCK_DGRAM,  # UDP
-    )
+async def listen(address):
+    ip_addr, port = address
+    family = socket.AF_INET6 if isinstance(ip_addr, IPv6Address) else socket.AF_INET
 
-    await udp_sock.bind(('127.0.0.1', 9999))
+    udp_sock = socket.socket(family=family, type=socket.SOCK_DGRAM)
+    await udp_sock.bind((ip_addr, port))
 
     while True:
-        data, address = await udp_sock.recvfrom(2048)
-        packet = PacketType.parse_packet(data)
-        print(address, packet)
+        try:
+            data, address = await udp_sock.recvfrom(2048)
+        except ConnectionResetError:
+            pass
+        else:
+            packet = PacketType.parse_packet(data)
+            print(address, packet)
 
-        if isinstance(packet, RequestResource):
-            data_with_metadata = DataWithMetadata(resource_size=0, block_id=0, fec_data=bytes())
-            await udp_sock.sendto(data_with_metadata.to_bytes(), address)
+            if isinstance(packet, RequestResource):
+                data_with_metadata = DataWithMetadata(resource_size=0, block_id=0, fec_data=bytes())
+                await udp_sock.sendto(data_with_metadata.to_bytes(), address)
 
 
-if __name__ == '__main__':
-    trio.run(main)
+async def start_listening(addresses):
+    async with trio.open_nursery() as nursery:
+        for address in addresses:
+            nursery.start_soon(listen, address)
+
+
+def run(file_reader, listen_addresses):
+    with file_reader:
+        print(file_reader.name)
+
+    trio.run(start_listening, listen_addresses)
