@@ -54,12 +54,12 @@ $ source venv/bin/activate
 
 ### Running the server
 ```
-(venv) $ python3 src/server.py
+(venv) $ python3 -m cmb_protocol server
 ```
 
 ### Running the client
 ```
-(venv) $ python3 src/client.py
+(venv) $ python3 -m cmb_protocol client
 ```
 
 ## Installing and running on Windows
