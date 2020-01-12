@@ -1,6 +1,6 @@
 import struct
 from enum import IntFlag
-from packets.packet import Packet
+from cmb_protocol.packets.packet import Packet
 
 
 class RequestResourceFlags(IntFlag):

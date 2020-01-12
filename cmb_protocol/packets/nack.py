@@ -1,5 +1,5 @@
 import struct
-from packets.packet import Packet
+from cmb_protocol.packets.packet import Packet
 
 
 class NackBlock(Packet):

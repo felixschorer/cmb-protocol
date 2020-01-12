@@ -2,7 +2,7 @@ import logging
 import trio
 from trio import socket
 from ipaddress import IPv6Address
-from packets import PacketType, RequestResource, DataWithMetadata
+from cmb_protocol.packets import PacketType, RequestResource, DataWithMetadata
 
 logger = logging.getLogger(__name__)
 
