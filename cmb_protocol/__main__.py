@@ -1,16 +1,18 @@
+import logging
 from argparse import ArgumentParser, FileType
 from ipaddress import ip_address
-
 from constants import DEFAULT_PORT, DEFAULT_IP_ADDR
+
+logger = logging.getLogger(__name__)
 
 MODE = 'mode'
 CLIENT = 'client'
 SERVER = 'server'
+VERBOSE = 'verbose'
 IP_ADDR = 'ip_addr'
 PORT = 'port'
 RESOURCE_ID = 'resource_id'
 OUTPUT = 'output'
-OVERHEAD = 'overhead'
 FILE = 'file'
 
 
@@ -19,16 +21,19 @@ def parse_args():
     address_parser.add_argument('-a', '--{}'.format(IP_ADDR), action='append', type=str, default=[])
     address_parser.add_argument('-p', '--{}'.format(PORT), action='append', type=int, default=[])
 
+    loglevel_parser = ArgumentParser(add_help=False)
+    loglevel_parser.add_argument('-v', '--{}'.format(VERBOSE), action='store_const', const=logging.DEBUG,
+                                 default=logging.INFO)
+
     main_parser = ArgumentParser()
 
     subparsers = main_parser.add_subparsers(dest=MODE)
 
-    client_parser = subparsers.add_parser(CLIENT, parents=[address_parser])
+    client_parser = subparsers.add_parser(CLIENT, parents=[address_parser, loglevel_parser])
     client_parser.add_argument(RESOURCE_ID, type=str)
     client_parser.add_argument(OUTPUT, type=FileType('wb'))
-    client_parser.add_argument('-o', '--{}'.format(OVERHEAD), type=int, default=0)
 
-    server_parser = subparsers.add_parser(SERVER, parents=[address_parser])
+    server_parser = subparsers.add_parser(SERVER, parents=[address_parser, loglevel_parser])
     server_parser.add_argument(FILE, type=FileType('rb'))
 
     return main_parser.parse_args()
@@ -36,6 +41,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    loglevel = getattr(args, VERBOSE)
+    logging.basicConfig(format='[%(levelname)s] %(message)s', level=loglevel)
 
     mode, ip_addrs, ports = getattr(args, MODE), getattr(args, IP_ADDR), getattr(args, PORT)
 
@@ -52,8 +60,8 @@ def main():
         ports *= len(ip_addrs)
 
     if len(ip_addrs) != len(ports):
-        print('Expected the number of addresses to match the number of port, ',
-              'or the number of addresses or ports to be 1.')
+        logger.error('Expected the number of addresses to match the number of port, ',
+                     'or the number of addresses or ports to be 1.')
         exit(1)
 
     parsed_ip_addrs = []
@@ -62,40 +70,36 @@ def main():
             parsed_ip_addr = ip_address(ip_addr)
             parsed_ip_addrs.append(parsed_ip_addr)
         except ValueError:
-            print('{} is not a valid IPv4 or IPv6 address.'.format(ip_addr))
+            logger.error('{} is not a valid IPv4 or IPv6 address.'.format(ip_addr))
             exit(1)
 
     for port in ports:
         if port < 2**10 or 2**16 - 1 < port:
-            print('{} is not within the valid port range [{}, {}]'.format(port, 2**10, 2**16 - 1))
+            logger.error('{} is not within the valid port range [{}, {}]'.format(port, 2**10, 2**16 - 1))
             exit(1)
 
     addresses = list(zip(ip_addrs, ports))
 
     if mode == CLIENT:
         if len(addresses) > 2:
-            print('Expected at most 2 addresses, {} were given.'.format(len(addresses)))
+            logger.error('Expected at most 2 addresses, {} were given.'.format(len(addresses)))
             exit(1)
 
         server_address, offloading_server_address = addresses[0], addresses[1] if len(addresses) == 2 else None
 
-        resource_id, overhead, output = getattr(args, RESOURCE_ID), getattr(args, OVERHEAD), getattr(args, OUTPUT)
-        if overhead < 0 or 2**8 - 1 < overhead:
-            print('Expected overhead to be within range [{}, {}].'.format(0, 2**8 - 1))
-            exit(1)
-
+        resource_id, output = getattr(args, RESOURCE_ID), getattr(args, OUTPUT)
         try:
             parsed_resource_id = bytes.fromhex(resource_id)
         except ValueError:
-            print('{} is not a valid resource id.'.format(resource_id))
+            logger.error('{} is not a valid resource id.'.format(resource_id))
             exit(1)
         else:
             if len(parsed_resource_id) != 16:
-                print('{} is not a valid resource id.'.format(resource_id))
+                logger.error('{} is not a valid resource id.'.format(resource_id))
                 exit(1)
 
             from client import run
-            run(resource_id=parsed_resource_id, server_address=server_address,
+            run(resource_id=parsed_resource_id, file_writer=output, server_address=server_address,
                 offloading_server_address=offloading_server_address)
 
     elif mode == SERVER:
@@ -106,5 +110,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-

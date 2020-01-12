@@ -1,10 +1,9 @@
 from enum import Enum, unique
-
-from cmb_protocol.packets.packet import Packet
-from cmb_protocol.packets.request_resource import RequestResource
-from cmb_protocol.packets.data import Data, DataWithMetadata
-from cmb_protocol.packets.ack import AckBlock, AckMetadata
-from cmb_protocol.packets.nack import NackBlock
+from packets.packet import Packet
+from packets.request_resource import RequestResource
+from packets.data import Data, DataWithMetadata
+from packets.ack import AckBlock, AckMetadata
+from packets.nack import NackBlock
 
 
 @unique

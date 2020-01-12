@@ -1,11 +1,12 @@
 import trio
 from trio import socket
 from ipaddress import IPv6Address
-from packets import RequestResource, PacketType
+from packets import PacketType, RequestResource
+from packets.request_resource import RequestResourceFlags
 
 
 async def init_protocol(sock):
-    resource_request = RequestResource(overhead=0, resource_id=bytes(16), block_offset=0)
+    resource_request = RequestResource(flags=RequestResourceFlags.NONE, resource_id=bytes(16), block_offset=0)
     packet_bytes = resource_request.to_bytes()
 
     await sock.send(packet_bytes)
@@ -33,5 +34,8 @@ async def start_download(resource_id, server_address, offloading_server_address=
         nursery.start_soon(receive, udp_sock)
 
 
-def run(resource_id, server_address, offloading_server_address=None):
+def run(resource_id, file_writer, server_address, offloading_server_address=None):
+    with file_writer:
+        print(file_writer.name)
+
     trio.run(start_download, resource_id, server_address, offloading_server_address)

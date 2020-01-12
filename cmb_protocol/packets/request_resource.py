@@ -1,26 +1,32 @@
 import struct
+from enum import IntFlag
+from packets.packet import Packet
 
-from cmb_protocol.packets.packet import Packet
+
+class RequestResourceFlags(IntFlag):
+    NONE = 0
+    REVERSE = 1
 
 
 class RequestResource(Packet):
-    __slots__ = 'overhead', 'resource_id', 'block_offset'
+    __slots__ = 'flags', 'resource_id', 'block_offset'
 
     _packet_type_ = 0xcb00
 
     __format = '!B1s16sQ'
 
-    def __init__(self, overhead, resource_id, block_offset):
+    def __init__(self, flags, resource_id, block_offset):
         super().__init__()
-        self.overhead = overhead
+        assert isinstance(flags, RequestResourceFlags)
+        self.flags = flags
         self.resource_id = resource_id
         self.block_offset = block_offset
 
     def _serialize_fields(self):
         return struct.pack(self.__format,
-                           self.overhead, bytes(1), self.resource_id, self.block_offset)
+                           self.flags, bytes(1), self.resource_id, self.block_offset)
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        overhead, reserved, resource_id, block_offset = struct.unpack(cls.__format, packet_bytes)
-        return RequestResource(overhead=overhead, resource_id=resource_id, block_offset=block_offset)
+        flags, reserved, resource_id, block_offset = struct.unpack(cls.__format, packet_bytes)
+        return RequestResource(flags=RequestResourceFlags(flags), resource_id=resource_id, block_offset=block_offset)

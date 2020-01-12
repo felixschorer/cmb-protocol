@@ -6,7 +6,7 @@ Bounded exponential back-off is used to resend the packet in case it got dropped
 ```
      0                              15 16                             32
     ┌─────────────────────────────────┬────────────────┬────────────────┐
-  0 |              0xcb00             |    Overhead    |    Reserved    |
+  0 |              0xcb00             |     Flags      |    Reserved    |
     ├─────────────────────────────────┴────────────────┴────────────────┤
   4 |                                                                   |
     |                                                                   |
@@ -21,7 +21,8 @@ Bounded exponential back-off is used to resend the packet in case it got dropped
  24 |                                                                   | 
     └───────────────────────────────────────────────────────────────────┘
 ```
-- Overhead: 8 bit unsigned integer to specify the ratio of repair packets which should be sent immediately ofter sending all the source packets
+- Flags: 8 bit field for specifying various options
+  - 0x01 REVERSE: Reverse the order in which the blocks are sent
 - Resource ID: 128 bit identifier of the requested resource
 - Block Offset: 64 bit unsigned integer to resume the transfer from a previous connection
 

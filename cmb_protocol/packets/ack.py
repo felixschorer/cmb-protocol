@@ -1,6 +1,5 @@
 import struct
-
-from cmb_protocol.packets.packet import Packet
+from packets.packet import Packet
 
 
 class AckBlock(Packet):
