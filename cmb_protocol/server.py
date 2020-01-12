@@ -1,7 +1,10 @@
+import logging
 import trio
 from trio import socket
 from ipaddress import IPv6Address
 from packets import PacketType, RequestResource, DataWithMetadata
+
+logger = logging.getLogger(__name__)
 
 
 async def listen(address):
@@ -18,7 +21,7 @@ async def listen(address):
             pass
         else:
             packet = PacketType.parse_packet(data)
-            print(address, packet)
+            logger.debug('Received {} from {}'.format(packet, address))
 
             if isinstance(packet, RequestResource):
                 data_with_metadata = DataWithMetadata(resource_size=0, block_id=0, fec_data=bytes())
@@ -33,6 +36,6 @@ async def start_listening(addresses):
 
 def run(file_reader, listen_addresses):
     with file_reader:
-        print(file_reader.name)
+        logger.debug('Reading from {}'.format(file_reader.name))
 
     trio.run(start_listening, listen_addresses)

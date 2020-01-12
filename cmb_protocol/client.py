@@ -1,8 +1,11 @@
+import logging
 import trio
 from trio import socket
 from ipaddress import IPv6Address
 from packets import PacketType, RequestResource
 from packets.request_resource import RequestResourceFlags
+
+logger = logging.getLogger(__name__)
 
 
 async def init_protocol(sock):
@@ -19,7 +22,7 @@ async def receive(sock):
         pass
     else:
         packet = PacketType.parse_packet(data)
-        print(address, packet)
+        logger.debug('Received {} from {}'.format(packet, address))
 
 
 async def start_download(resource_id, server_address, offloading_server_address=None):
@@ -36,6 +39,6 @@ async def start_download(resource_id, server_address, offloading_server_address=
 
 def run(resource_id, file_writer, server_address, offloading_server_address=None):
     with file_writer:
-        print(file_writer.name)
+        logger.debug('Writing to {}'.format(file_writer.name))
 
     trio.run(start_download, resource_id, server_address, offloading_server_address)

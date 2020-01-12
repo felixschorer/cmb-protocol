@@ -3,7 +3,7 @@ from argparse import ArgumentParser, FileType
 from ipaddress import ip_address
 from constants import DEFAULT_PORT, DEFAULT_IP_ADDR
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
 MODE = 'mode'
 CLIENT = 'client'
