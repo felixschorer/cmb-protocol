@@ -19,6 +19,8 @@ async def receive(sock):
     try:
         data, address = await sock.recvfrom(2048)
     except ConnectionResetError:
+        # maybe handle this error
+        # however, it is not guaranteed that we will receive an error when sending into the void
         pass
     else:
         packet = PacketType.parse_packet(data)
@@ -38,7 +40,6 @@ async def start_download(resource_id, server_address, offloading_server_address=
 
 
 def run(resource_id, file_writer, server_address, offloading_server_address=None):
-    with file_writer:
-        logger.debug('Writing to {}'.format(file_writer.name))
+    logger.debug('Writing to {}'.format(file_writer.name))
 
     trio.run(start_download, resource_id, server_address, offloading_server_address)

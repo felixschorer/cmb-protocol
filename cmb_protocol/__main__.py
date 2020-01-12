@@ -61,7 +61,7 @@ def main():
 
     if len(ip_addrs) != len(ports):
         logger.error('Expected the number of addresses to match the number of port, ',
-                     'or the number of addresses or ports to be 1.')
+                     'or the number of addresses or ports to be 1')
         exit(1)
 
     parsed_ip_addrs = []
@@ -70,7 +70,7 @@ def main():
             parsed_ip_addr = ip_address(ip_addr)
             parsed_ip_addrs.append(parsed_ip_addr)
         except ValueError:
-            logger.error('{} is not a valid IPv4 or IPv6 address.'.format(ip_addr))
+            logger.error('{} is not a valid IPv4 or IPv6 address'.format(ip_addr))
             exit(1)
 
     for port in ports:
@@ -82,7 +82,7 @@ def main():
 
     if mode == CLIENT:
         if len(addresses) > 2:
-            logger.error('Expected at most 2 addresses, {} were given.'.format(len(addresses)))
+            logger.error('Expected at most 2 addresses, {} were given'.format(len(addresses)))
             exit(1)
 
         server_address, offloading_server_address = addresses[0], addresses[1] if len(addresses) == 2 else None
@@ -91,11 +91,11 @@ def main():
         try:
             parsed_resource_id = bytes.fromhex(resource_id)
         except ValueError:
-            logger.error('{} is not a valid resource id.'.format(resource_id))
+            logger.error('{} is not a valid resource id'.format(resource_id))
             exit(1)
         else:
             if len(parsed_resource_id) != 16:
-                logger.error('{} is not a valid resource id.'.format(resource_id))
+                logger.error('{} is not a valid resource id'.format(resource_id))
                 exit(1)
 
             from cmb_protocol.client import run
