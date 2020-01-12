@@ -98,13 +98,13 @@ def main():
                 logger.error('{} is not a valid resource id.'.format(resource_id))
                 exit(1)
 
-            from client import run
+            from cmb_protocol.client import run
             run(resource_id=parsed_resource_id, file_writer=output, server_address=server_address,
                 offloading_server_address=offloading_server_address)
 
     elif mode == SERVER:
         file_type = getattr(args, FILE)
-        from server import run
+        from cmb_protocol.server import run
         run(file_type, addresses)
 
 
