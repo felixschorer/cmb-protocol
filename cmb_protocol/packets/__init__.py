@@ -2,7 +2,7 @@ from enum import Enum, unique
 from cmb_protocol.packets.packet import Packet
 from cmb_protocol.packets.request_resource import RequestResource
 from cmb_protocol.packets.data import Data, DataWithMetadata
-from cmb_protocol.packets.ack import AckBlock, AckMetadata
+from cmb_protocol.packets.ack import AckBlock, AckMetadata, AckOppositeRange
 from cmb_protocol.packets.nack import NackBlock
 
 
@@ -18,6 +18,7 @@ class PacketType(Enum):
     ACK_BLOCK = AckBlock
     ACK_METADATA = AckMetadata
     NACK_BLOCK = NackBlock
+    ACK_OPPOSITE_RANGE = AckOppositeRange
 
     def __new__(cls, packet_cls):
         assert issubclass(packet_cls, Packet)

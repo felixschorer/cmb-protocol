@@ -97,12 +97,26 @@ Packet to notify the sender to send repair packets of the given block.
 ```
      0                              15 16                             32
     ┌─────────────────────────────────┬─────────────────────────────────┐
-  0 |              0xcb05             |          Lost Packets           |
+  0 |              0xcb05             |        Received Packets         |
     ├─────────────────────────────────┴─────────────────────────────────┤
   4 |                                                                   |
     |                             Block ID                              |
   8 |                                                                   |
     └───────────────────────────────────────────────────────────────────┘
 ```
-- Lost Packets: Number of packets of this block which have been lost (16 bit unsigned integer)
+- Received Packets: Number of packets of this block which have been received (16 bit unsigned integer)
 - Block ID: 64 bit identifier of the block whose receipt has been acknowledged
+
+## Ack Opposite Range
+Acknowledges the receipt of a block range from the given block to the end of the block sequence.
+```
+     0                              15 16                             32
+    ┌─────────────────────────────────┬─────────────────────────────────┐
+  0 |              0xcb06             |            Reserved             |
+    ├─────────────────────────────────┴─────────────────────────────────┤
+  4 |                                                                   |
+    |                             Block ID                              |
+  8 |                                                                   |
+    └───────────────────────────────────────────────────────────────────┘
+```
+- Block ID: 64 bit identifier of the block who marks the start of the range
