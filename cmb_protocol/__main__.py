@@ -9,6 +9,8 @@ SERVER = 'server'
 IP_ADDR = 'ip_addr'
 PORT = 'port'
 RESOURCE_ID = 'resource_id'
+OUTPUT = 'output'
+OVERHEAD = 'overhead'
 FILE = 'file'
 
 
@@ -23,6 +25,8 @@ def parse_args():
 
     client_parser = subparsers.add_parser(CLIENT, parents=[address_parser])
     client_parser.add_argument(RESOURCE_ID, type=str)
+    client_parser.add_argument(OUTPUT, type=FileType('wb'))
+    client_parser.add_argument('-o', '--{}'.format(OVERHEAD), type=int, default=0)
 
     server_parser = subparsers.add_parser(SERVER, parents=[address_parser])
     server_parser.add_argument(FILE, type=FileType('rb'))
@@ -75,7 +79,11 @@ def main():
 
         server_address, offloading_server_address = addresses[0], addresses[1] if len(addresses) == 2 else None
 
-        resource_id = getattr(args, RESOURCE_ID)
+        resource_id, overhead, output = getattr(args, RESOURCE_ID), getattr(args, OVERHEAD), getattr(args, OUTPUT)
+        if overhead < 0 or 2**8 - 1 < overhead:
+            print('Expected overhead to be within range [{}, {}].'.format(0, 2**8 - 1))
+            exit(1)
+
         try:
             parsed_resource_id = bytes.fromhex(resource_id)
         except ValueError:
