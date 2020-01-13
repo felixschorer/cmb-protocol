@@ -19,4 +19,9 @@ async def _run_nursery_until_event(send_channel, shutdown_trigger):
         nursery.start_soon(shutdown_trigger.wait)
         async with send_channel:
             await send_channel.send(nursery)
+
+    if nursery.cancel_scope.cancelled_caught:
+        # in case of cancellation trigger shutdown event as some cleanup code might depend on it
+        shutdown_trigger.set()
+
     logger.debug('Stopped child nursery')
