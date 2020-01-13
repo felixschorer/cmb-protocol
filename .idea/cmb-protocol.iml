@@ -6,7 +6,6 @@
       <sourceFolder url="file://$MODULE_DIR$/raptorq/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/raptorq/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/raptorq/benches" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/cmb_protocol" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/raptorq/target" />
       <excludeFolder url="file://$MODULE_DIR$/venv" />
     </content>

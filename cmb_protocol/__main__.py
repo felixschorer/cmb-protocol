@@ -1,9 +1,9 @@
-import logging
 from argparse import ArgumentParser, FileType
 from ipaddress import ip_address
 from cmb_protocol.constants import DEFAULT_PORT, DEFAULT_IP_ADDR
+from cmb_protocol.helpers import get_logger, enable_verbose_logging
 
-logger = logging.getLogger()
+logger = get_logger(__file__)
 
 MODE = 'mode'
 CLIENT = 'client'
@@ -22,8 +22,8 @@ def parse_args():
     address_parser.add_argument('-p', '--{}'.format(PORT), action='append', type=int, default=[])
 
     loglevel_parser = ArgumentParser(add_help=False)
-    loglevel_parser.add_argument('-v', '--{}'.format(VERBOSE), action='store_const', const=logging.DEBUG,
-                                 default=logging.INFO)
+    loglevel_parser.add_argument('-v', '--{}'.format(VERBOSE), action='store_const', const=True,
+                                 default=False)
 
     main_parser = ArgumentParser()
 
@@ -42,8 +42,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    loglevel = getattr(args, VERBOSE)
-    logging.basicConfig(format='[%(levelname)s] %(message)s', level=loglevel)
+    enable_verbose_logging(getattr(args, VERBOSE))
 
     mode, ip_addrs, ports = getattr(args, MODE), getattr(args, IP_ADDR), getattr(args, PORT)
 
@@ -64,25 +63,23 @@ def main():
                      'or the number of addresses or ports to be 1')
         exit(1)
 
-    parsed_ip_addrs = []
     for ip_addr in ip_addrs:
         try:
-            parsed_ip_addr = ip_address(ip_addr)
-            parsed_ip_addrs.append(parsed_ip_addr)
+            ip_address(ip_addr)
         except ValueError:
-            logger.error('{} is not a valid IPv4 or IPv6 address'.format(ip_addr))
+            logger.error('%s is not a valid IPv4 or IPv6 address', ip_addr)
             exit(1)
 
     for port in ports:
         if port < 2**10 or 2**16 - 1 < port:
-            logger.error('{} is not within the valid port range [{}, {}]'.format(port, 2**10, 2**16 - 1))
+            logger.error('%d is not within the valid port range [%d, %d]', port, 2**10, 2**16 - 1)
             exit(1)
 
     addresses = list(zip(ip_addrs, ports))
 
     if mode == CLIENT:
         if len(addresses) > 2:
-            logger.error('Expected at most 2 addresses, {} were given'.format(len(addresses)))
+            logger.error('Expected at most 2 addresses, %d were given', len(addresses))
             exit(1)
 
         server_address, offloading_server_address = addresses[0], addresses[1] if len(addresses) == 2 else None
@@ -91,11 +88,11 @@ def main():
         try:
             parsed_resource_id = bytes.fromhex(resource_id)
         except ValueError:
-            logger.error('{} is not a valid resource id'.format(resource_id))
+            logger.error('%s is not a valid resource id', resource_id)
             exit(1)
         else:
             if len(parsed_resource_id) != 16:
-                logger.error('{} is not a valid resource id'.format(resource_id))
+                logger.error('%s is not a valid resource id', resource_id)
                 exit(1)
 
             from cmb_protocol.client import run

@@ -1,13 +1,9 @@
-import logging
 import trio
 from trio import socket
-from ipaddress import IPv6Address
-from contextvars import ContextVar
 from cmb_protocol.packets import PacketType, RequestResource, DataWithMetadata
-from cmb_protocol.helpers import spawn_child_nursery
+from cmb_protocol.helpers import spawn_child_nursery, get_logger, set_listen_address, set_remote_address, get_ip_family
 
-logger = logging.getLogger(__name__)
-listen_address = ContextVar('listen_address')
+logger = get_logger(__name__)
 
 
 class Connection:
@@ -29,7 +25,7 @@ async def accept_connection(connections, udp_sock, nursery, address):
     def shutdown():
         shutdown_trigger.set()
         del connections[address]
-        logger.debug('Closed connection {} <-> {}'.format(listen_address.get(), address))
+        logger.debug('Closed connection')
 
     spawn = child_nursery.start_soon
 
@@ -38,7 +34,7 @@ async def accept_connection(connections, udp_sock, nursery, address):
         await udp_sock.sendto(data, address)
 
     connections[address] = Connection(shutdown, spawn, send)
-    logger.debug('Accepted connection {} <-> {}'.format(listen_address.get(), address))
+    logger.debug('Accepted connection')
 
 
 async def run_accept_loop(udp_sock):
@@ -51,8 +47,9 @@ async def run_accept_loop(udp_sock):
                 # ignore error as we can't infer which send operation failed
                 pass
             else:
+                set_remote_address(address)
                 packet = PacketType.parse_packet(data)
-                logger.debug('Received {} on {} from {}'.format(packet, listen_address.get(), address))
+                logger.debug('Received %s', packet)
 
                 if address not in connections:
                     if not isinstance(packet, RequestResource):
@@ -63,12 +60,10 @@ async def run_accept_loop(udp_sock):
 
 
 async def listen(address):
-    listen_address.set(address)
-    ip_addr, port = address
-    family = socket.AF_INET6 if isinstance(ip_addr, IPv6Address) else socket.AF_INET
-    with socket.socket(family=family, type=socket.SOCK_DGRAM) as udp_sock:
-        await udp_sock.bind((ip_addr, port))
-        logger.info('Started listening on {}'.format(address))
+    set_listen_address(address)
+    with socket.socket(family=get_ip_family(address), type=socket.SOCK_DGRAM) as udp_sock:
+        await udp_sock.bind(address)
+        logger.info('Started listening')
         await run_accept_loop(udp_sock)
 
 
@@ -79,5 +74,5 @@ async def listen_to_all(addresses):
 
 
 def run(file_reader, addresses):
-    logger.debug('Reading from {}'.format(file_reader.name))
+    logger.debug('Reading from %s', file_reader.name)
     trio.run(listen_to_all, addresses)

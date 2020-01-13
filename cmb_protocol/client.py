@@ -1,11 +1,10 @@
-import logging
 import trio
 from trio import socket
-from ipaddress import IPv6Address
 from cmb_protocol.packets import PacketType, RequestResource
 from cmb_protocol.packets.request_resource import RequestResourceFlags
+from cmb_protocol.helpers import get_logger, set_listen_address, set_remote_address, get_ip_family
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def init_protocol(sock):
@@ -24,22 +23,20 @@ async def receive(sock):
         pass
     else:
         packet = PacketType.parse_packet(data)
-        logger.debug('Received {} from {}'.format(packet, address))
+        logger.debug('Received %s', packet)
 
 
 async def start_download(resource_id, server_address, offloading_server_address=None):
-    ip_addr, port = server_address
-    family = socket.AF_INET6 if isinstance(ip_addr, IPv6Address) else socket.AF_INET
-
-    udp_sock = socket.socket(family=family, type=socket.SOCK_DGRAM)
-    await udp_sock.connect((ip_addr, port))
-
-    async with trio.open_nursery() as nursery:
-        nursery.start_soon(init_protocol, udp_sock)
-        nursery.start_soon(receive, udp_sock)
+    set_remote_address(server_address)
+    with socket.socket(family=get_ip_family(server_address), type=socket.SOCK_DGRAM) as udp_sock:
+        await udp_sock.connect(server_address)
+        set_listen_address(udp_sock.getsockname())
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(init_protocol, udp_sock)
+            nursery.start_soon(receive, udp_sock)
 
 
 def run(resource_id, file_writer, server_address, offloading_server_address=None):
-    logger.debug('Writing to {}'.format(file_writer.name))
+    logger.debug('Writing to %s', file_writer.name)
 
     trio.run(start_download, resource_id, server_address, offloading_server_address)
