@@ -2,27 +2,19 @@ import logging
 import trio
 from trio import socket
 from ipaddress import IPv6Address
+from contextvars import ContextVar
 from cmb_protocol.packets import PacketType, RequestResource, DataWithMetadata
 from cmb_protocol.helpers import spawn_child_nursery
 
 logger = logging.getLogger(__name__)
-
-
-class BoundTransport:
-    def __init__(self, sock, address):
-        self._sock = sock
-        self._address = address
-
-    async def send(self, packet):
-        data = packet.to_bytes()
-        await self._sock.sendto(data, self._address)
+listen_address = ContextVar('listen_address')
 
 
 class Connection:
-    def __init__(self, shutdown_trigger, nursery, transport):
-        self._shutdown_trigger = shutdown_trigger
-        self._nursery = nursery
-        self._transport = transport
+    def __init__(self, shutdown, spawn, send):
+        self.shutdown = shutdown
+        self.spawn = spawn
+        self.send = send
 
     async def handle_packet(self, packet):
         if isinstance(packet, RequestResource):
@@ -30,63 +22,62 @@ class Connection:
             await self.send(data_with_metadata)
         self.shutdown()
 
-    async def send(self, packet):
-        await self._transport.send(packet)
 
-    def shutdown(self):
-        self._shutdown_trigger.set()
+async def accept_connection(connections, udp_sock, nursery, address):
+    child_nursery, shutdown_trigger = await spawn_child_nursery(nursery)
 
-    def force_close(self):
-        self._nursery.cancel_scope.cancel()
+    def shutdown():
+        shutdown_trigger.set()
+        del connections[address]
+        logger.debug('Closed connection {} <-> {}'.format(listen_address.get(), address))
+
+    spawn = child_nursery.start_soon
+
+    async def send(packet):
+        data = packet.to_bytes()
+        await udp_sock.sendto(data, address)
+
+    connections[address] = Connection(shutdown, spawn, send)
+    logger.debug('Accepted connection {} <-> {}'.format(listen_address.get(), address))
 
 
-async def listen(listen_address, nursery):
-    ip_addr, port = listen_address
+async def run_accept_loop(udp_sock):
+    async with trio.open_nursery() as nursery:
+        connections = dict()
+        while True:
+            try:
+                data, address = await udp_sock.recvfrom(2048)
+            except ConnectionResetError:
+                # ignore error as we can't infer which send operation failed
+                pass
+            else:
+                packet = PacketType.parse_packet(data)
+                logger.debug('Received {} on {} from {}'.format(packet, listen_address.get(), address))
+
+                if address not in connections:
+                    if not isinstance(packet, RequestResource):
+                        continue
+                    await accept_connection(connections, udp_sock, nursery, address)
+
+                await connections[address].handle_packet(packet)
+
+
+async def listen(address):
+    listen_address.set(address)
+    ip_addr, port = address
     family = socket.AF_INET6 if isinstance(ip_addr, IPv6Address) else socket.AF_INET
-
-    udp_sock = socket.socket(family=family, type=socket.SOCK_DGRAM)
-    await udp_sock.bind((ip_addr, port))
-
-    logger.info('Started listening on {}'.format(listen_address))
-
-    connections = dict()
-    while True:
-        try:
-            data, address = await udp_sock.recvfrom(2048)
-        except ConnectionResetError:
-            # ignore error as we can't infer which send operation failed
-            pass
-        else:
-            packet = PacketType.parse_packet(data)
-            logger.debug('Received {} from {}'.format(packet, address))
-
-            if address not in connections:
-                if not isinstance(packet, RequestResource):
-                    continue
-
-                child_nursery, shutdown_trigger = await spawn_child_nursery(nursery)
-                transport = BoundTransport(udp_sock, address)
-                connections[address] = Connection(shutdown_trigger, child_nursery, transport)
-
-                logger.debug('Accepted connection {} <-> {}'.format(listen_address, address))
-
-                async def cleanup():
-                    await shutdown_trigger.wait()
-                    del connections[address]
-                    logger.debug('Closed connection {} <-> {}'.format(listen_address, address))
-
-                nursery.start_soon(cleanup)
-
-            await connections[address].handle_packet(packet)
+    with socket.socket(family=family, type=socket.SOCK_DGRAM) as udp_sock:
+        await udp_sock.bind((ip_addr, port))
+        logger.info('Started listening on {}'.format(address))
+        await run_accept_loop(udp_sock)
 
 
-async def start_listening(addresses):
+async def listen_to_all(addresses):
     async with trio.open_nursery() as nursery:
         for address in addresses:
-            nursery.start_soon(listen, address, nursery)
+            nursery.start_soon(listen, address)
 
 
-def run(file_reader, listen_addresses):
+def run(file_reader, addresses):
     logger.debug('Reading from {}'.format(file_reader.name))
-
-    trio.run(start_listening, listen_addresses)
+    trio.run(listen_to_all, addresses)
