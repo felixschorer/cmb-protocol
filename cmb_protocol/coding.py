@@ -1,24 +1,31 @@
-# import os
-# import random
-# from raptorq import SourceBlockEncoder, SourceBlockDecoder
-#
-# symbol_size = 512
-# data = os.urandom(symbol_size * 100 + 1)
-# padding = bytes(symbol_size - len(data) % symbol_size) if len(data) % symbol_size > 0 else bytes()
-# padded_data = data + padding
-#
-# enc = SourceBlockEncoder(0, symbol_size, padded_data)
-#
-# packets = enc.source_packets() + enc.repair_packets(0, 50)
-#
-# random.shuffle(packets)
-#
-# dec = SourceBlockDecoder(0, symbol_size, len(padded_data))
-#
-# result = None
-# for packet in packets[50:]:
-#     result = dec.decode(packet)
-#     if result:
-#         break
-#
-# assert padded_data == result
+from sys import maxsize
+from raptorq import SourceBlockEncoder, SourceBlockDecoder
+
+
+class Encoder:
+    def __init__(self, data, symbol_size):
+        padded_symbol_length = len(data) % symbol_size
+        if padded_symbol_length > 0:
+            data += bytes(symbol_size - padded_symbol_length)
+        self._enc = SourceBlockEncoder(0, symbol_size, data)
+
+    @property
+    def source_packets(self):
+        return self._enc.source_packets()
+
+    def repair_packets(self):
+        for offset in range(0, maxsize, 10):
+            for packet in self._enc.repair_packets(offset, 10):
+                yield packet
+
+
+class Decoder:
+    def __init__(self, data_length, symbol_size):
+        self._data_length = data_length
+        self._dec = SourceBlockDecoder(0, symbol_size, data_length)
+
+    def decode(self, data):
+        result = self._dec.decode(data)
+        if result is None:
+            return None
+        return result[:self._data_length]
