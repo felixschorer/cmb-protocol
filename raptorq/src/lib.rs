@@ -61,8 +61,14 @@ impl SourceBlockDecoder {
         });
     }
 
-    pub fn decode<'p>(&mut self, py: Python<'p>, packet: &PyBytes) -> PyResult<Option<&'p PyBytes>> {
-        let result = self.decoder.decode(vec![EncodingPacket::deserialize(packet.as_bytes())]);
+    pub fn decode<'p>(&mut self, py: Python<'p>, packets: &PyList) -> PyResult<Option<&'p PyBytes>> {
+        let mut unpacked_packets: Vec<EncodingPacket> = Vec::new();
+        for n in 0..packets.len() {
+            let any = packets.get_item(n as isize);
+            let bytes = any.downcast_ref::<PyBytes>()?;
+            unpacked_packets.push(EncodingPacket::deserialize(bytes.as_bytes()));
+        }
+        let result = self.decoder.decode(unpacked_packets);
         Ok(result.map(|data| PyBytes::new(py, &data)))
     }
 }

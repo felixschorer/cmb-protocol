@@ -24,8 +24,8 @@ class Decoder:
         self._data_length = data_length
         self._dec = SourceBlockDecoder(0, symbol_size, data_length)
 
-    def decode(self, data):
-        result = self._dec.decode(data)
+    def decode(self, packets):
+        result = self._dec.decode(packets)
         if result is None:
             return None
         return result[:self._data_length]
