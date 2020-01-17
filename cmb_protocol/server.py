@@ -71,5 +71,8 @@ async def listen_to_all(addresses):
 
 
 def run(file_reader, addresses):
+
+    # read file, split file into blocks, create encoders for blocks, hash file, print file hash concatenated with length
+
     logger.debug('Reading from %s', file_reader.name)
     trio.run(listen_to_all, addresses)
