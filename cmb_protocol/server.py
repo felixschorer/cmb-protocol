@@ -14,7 +14,7 @@ from cmb_protocol.helpers import spawn_child_nursery, get_logger, set_listen_add
 logger = get_logger(__name__)
 
 
-async def accept_connection(connections, udp_sock, nursery, address, resource_id, encoders):
+async def accept_connection(nursery, connections, udp_sock, address, resource_id, encoders):
     child_nursery, shutdown_trigger = await spawn_child_nursery(nursery)
 
     def shutdown():
@@ -49,7 +49,7 @@ async def run_accept_loop(udp_sock, resource_id, encoders):
                 if address not in connections:
                     if not isinstance(packet, RequestResource):
                         continue
-                    await accept_connection(connections, udp_sock, nursery, address, resource_id, encoders)
+                    await accept_connection(nursery, connections, udp_sock, address, resource_id, encoders)
 
                 await connections[address].handle_packet(packet)
 

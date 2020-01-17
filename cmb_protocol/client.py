@@ -12,7 +12,7 @@ from cmb_protocol.helpers import get_logger, set_listen_address, set_remote_addr
 logger = get_logger(__name__)
 
 
-async def start_connection(address, nursery, write_blocks, resource_id, reverse):
+async def start_connection(nursery, address, write_blocks, resource_id, reverse):
     sock = socket.socket(family=get_ip_family(address), type=socket.SOCK_DGRAM)
     cancel_scope = trio.CancelScope()
 
@@ -75,12 +75,12 @@ async def download(resource_id, server_address, offloading_server_address=None):
                 await offloading_server_connection.send_stop(offset + len(received_blocks) - 1)
 
         # start from beginning of file
-        server_connection = await start_connection(server_address, nursery, partial(write_blocks, reverse=False),
+        server_connection = await start_connection(nursery, server_address, partial(write_blocks, reverse=False),
                                                    resource_id, reverse=False)
 
         # start from end of file as well (if offloading address specified)
         if offloading_server_address:
-            offloading_server_connection = await start_connection(offloading_server_address, nursery,
+            offloading_server_connection = await start_connection(nursery, offloading_server_address,
                                                                   partial(write_blocks, reverse=True),
                                                                   resource_id, reverse=True)
 
