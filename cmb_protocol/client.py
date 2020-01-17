@@ -20,36 +20,46 @@ class ClientConnection(Connection):
         self.reverse = reverse
 
     async def init_protocol(self):
-        resource_request = RequestResource(flags=RequestResourceFlags.NONE,
+        flags = RequestResourceFlags.REVERSE if self.reverse else RequestResourceFlags.NONE
+        _, resource_length = self.resource_id
+        offset = calculate_number_of_blocks(resource_length, MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK) - 1 if self.reverse else 0
+        resource_request = RequestResource(flags=flags,
                                            resource_id=self.resource_id,
-                                           block_offset=0)
+                                           block_offset=offset)
         await self.send(resource_request)
 
     async def handle_packet(self, packet):
         self.shutdown()
 
-    def send_stop(self, block_id):
+    async def send_stop(self, block_id):
         pass
 
 
-async def open_connection(udp_sock, nursery, write_blocks, stop_loop, resource_id, reverse=False):
+async def start_connection(address, nursery, write_blocks, resource_id, reverse):
+    sock = socket.socket(family=get_ip_family(address), type=socket.SOCK_DGRAM)
+    cancel_scope = trio.CancelScope()
+
     child_nursery, shutdown_trigger = await spawn_child_nursery(nursery)
 
     def shutdown():
         shutdown_trigger.set()
-        stop_loop()
+        cancel_scope.cancel()
         logger.debug('Closed connection')
 
     spawn = child_nursery.start_soon
 
     async def send(packet):
         data = packet.to_bytes()
-        await udp_sock.send(data)
+        await sock.send(data)
 
-    return ClientConnection(shutdown, spawn, send, write_blocks, resource_id, reverse)
+    connection = ClientConnection(shutdown, spawn, send, write_blocks, resource_id, reverse)
+
+    nursery.start_soon(run_receive_loop, connection, sock, address, cancel_scope)
+
+    return connection
 
 
-async def run_connection(connection, udp_sock, server_address, cancel_scope):
+async def run_receive_loop(connection, udp_sock, server_address, cancel_scope):
     with udp_sock, cancel_scope:
         await udp_sock.connect(server_address)
         set_listen_address(udp_sock.getsockname())
@@ -70,7 +80,7 @@ async def run_connection(connection, udp_sock, server_address, cancel_scope):
                 await connection.handle_packet(packet)
 
 
-async def download(resource_id, file_writer, server_address, offloading_server_address=None):
+async def download(resource_id, server_address, offloading_server_address=None):
     async with trio.open_nursery() as nursery:
         server_connection, offloading_server_connection = None, None
 
@@ -80,44 +90,33 @@ async def download(resource_id, file_writer, server_address, offloading_server_a
 
         async def write_blocks(offset, received_blocks, reverse=False):
             # TODO: maybe need to reverse received blocks if reversed=True
-            blocks[offset:offset + len(blocks)] = received_blocks
+            blocks[offset:offset + len(received_blocks)] = received_blocks
 
             if reverse:
                 await server_connection.send_stop(offset)
             elif offloading_server_address:
                 await offloading_server_connection.send_stop(offset + len(received_blocks) - 1)
 
-        server_sock = socket.socket(family=get_ip_family(server_address), type=socket.SOCK_DGRAM)
-        server_cancel_scope = trio.CancelScope()
-        server_connection = await open_connection(udp_sock=server_sock,
-                                                  nursery=nursery,
-                                                  write_blocks=partial(write_blocks, reverse=False),
-                                                  stop_loop=server_cancel_scope.cancel,
-                                                  resource_id=resource_id,
-                                                  reverse=False)
+        # start from beginning of file
+        server_connection = await start_connection(server_address, nursery, partial(write_blocks, reverse=False),
+                                                   resource_id, reverse=False)
 
+        # start from end of file as well (if offloading address specified)
         if offloading_server_address:
-            offloading_server_sock = socket.socket(family=get_ip_family(offloading_server_address), type=socket.SOCK_DGRAM)
-            offloading_server_cancel_scope = trio.CancelScope()
-            offloading_server_connection = await open_connection(udp_sock=offloading_server_sock,
-                                                                 nursery=nursery,
-                                                                 write_blocks=partial(write_blocks, reverse=False),
-                                                                 stop_loop=offloading_server_cancel_scope.cancel,
-                                                                 resource_id=resource_id,
-                                                                 reverse=True)
-
-            nursery.start_soon(run_connection, offloading_server_connection, offloading_server_sock, offloading_server_address, offloading_server_cancel_scope)
-
-        nursery.start_soon(run_connection, server_connection, server_sock, server_address, server_cancel_scope)
+            offloading_server_connection = await start_connection(offloading_server_address, nursery,
+                                                                  partial(write_blocks, reverse=True),
+                                                                  resource_id, reverse=True)
 
     assert all([block is not None for block in blocks])
 
-    with file_writer:
-        for block in blocks:
-            file_writer.write(block)
+    return blocks
 
 
 def run(resource_id, file_writer, server_address, offloading_server_address=None):
     logger.debug('Writing to %s', file_writer.name)
 
-    trio.run(download, resource_id, file_writer, server_address, offloading_server_address)
+    blocks = trio.run(download, resource_id, server_address, offloading_server_address)
+
+    with file_writer:
+        for block in blocks:
+            file_writer.write(block)
