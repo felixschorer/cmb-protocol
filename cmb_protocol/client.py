@@ -1,7 +1,6 @@
 import trio
 from trio import socket
-from cmb_protocol.packets import PacketType, RequestResource
-from cmb_protocol.packets.request_resource import RequestResourceFlags
+from cmb_protocol.packets import PacketType, RequestResourceFlags, RequestResource
 from cmb_protocol.helpers import get_logger, set_listen_address, set_remote_address, get_ip_family
 
 logger = get_logger(__name__)
