@@ -38,6 +38,11 @@ class ClientSideConnection(Connection):
 
 
 class ServerSideConnection(Connection):
+    def __init__(self, shutdown, spawn, send, resource_id, encoders):
+        super().__init__(shutdown, spawn, send)
+        self.resource_id = resource_id
+        self.encoders = encoders
+
     async def handle_packet(self, packet):
         if isinstance(packet, RequestResource):
             data = Data(block_id=0, fec_data=bytes())
