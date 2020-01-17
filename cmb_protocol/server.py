@@ -1,19 +1,16 @@
+import struct
 import trio
+import hashlib
+
+from functools import partial
 from trio import socket
 
-from cmb_protocol.connection import Connection
-from cmb_protocol.packets import PacketType, RequestResource, Data
+from cmb_protocol.connection import ServerSideConnection
+from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK, RESOURCE_ID_STRUCT_FORMAT
+from cmb_protocol.packets import PacketType, RequestResource
 from cmb_protocol.helpers import spawn_child_nursery, get_logger, set_listen_address, set_remote_address, get_ip_family
 
 logger = get_logger(__name__)
-
-
-class ServerConnection(Connection):
-    async def handle_packet(self, packet):
-        if isinstance(packet, RequestResource):
-            data = Data(block_id=0, fec_data=bytes())
-            await self.send(data)
-        self.shutdown()
 
 
 async def accept_connection(connections, udp_sock, nursery, address):
@@ -30,7 +27,7 @@ async def accept_connection(connections, udp_sock, nursery, address):
         data = packet.to_bytes()
         await udp_sock.sendto(data, address)
 
-    connections[address] = ServerConnection(shutdown, spawn, send)
+    connections[address] = ServerSideConnection(shutdown, spawn, send)
     logger.debug('Accepted connection')
 
 
@@ -71,8 +68,21 @@ async def listen_to_all(addresses):
 
 
 def run(file_reader, addresses):
+    m = hashlib.md5()
+    resource_length = 0
 
     # read file, split file into blocks, create encoders for blocks, hash file, print file hash concatenated with length
+    with file_reader:
+        logger.debug('Reading from %s', file_reader.name)
 
-    logger.debug('Reading from %s', file_reader.name)
+        block_size = MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK
+        for block in iter(partial(file_reader.read, block_size), b''):
+            m.update(block)
+            resource_length += len(block)
+
+    resource_hash = m.digest()
+    resource_id = (resource_hash, resource_length)
+    packed_resource_id = struct.pack(RESOURCE_ID_STRUCT_FORMAT, *resource_id).hex()
+
+    logger.debug('Serving resource %s', packed_resource_id)
     trio.run(listen_to_all, addresses)

@@ -3,36 +3,13 @@ from functools import partial
 import trio
 from trio import socket
 
-from cmb_protocol.connection import Connection
+from cmb_protocol.connection import ClientSideConnection
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK
-from cmb_protocol.packets import PacketType, RequestResourceFlags, RequestResource
+from cmb_protocol.packets import PacketType
 from cmb_protocol.helpers import get_logger, set_listen_address, set_remote_address, get_ip_family, spawn_child_nursery, \
     calculate_number_of_blocks
 
 logger = get_logger(__name__)
-
-
-class ClientConnection(Connection):
-    def __init__(self, shutdown, spawn, send, write_blocks, resource_id, reverse=False):
-        super().__init__(shutdown, spawn, send)
-        self.write_blocks = write_blocks
-        self.resource_id = resource_id
-        self.reverse = reverse
-
-    async def init_protocol(self):
-        flags = RequestResourceFlags.REVERSE if self.reverse else RequestResourceFlags.NONE
-        _, resource_length = self.resource_id
-        offset = calculate_number_of_blocks(resource_length, MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK) - 1 if self.reverse else 0
-        resource_request = RequestResource(flags=flags,
-                                           resource_id=self.resource_id,
-                                           block_offset=offset)
-        await self.send(resource_request)
-
-    async def handle_packet(self, packet):
-        self.shutdown()
-
-    async def send_stop(self, block_id):
-        pass
 
 
 async def start_connection(address, nursery, write_blocks, resource_id, reverse):
@@ -52,7 +29,7 @@ async def start_connection(address, nursery, write_blocks, resource_id, reverse)
         data = packet.to_bytes()
         await sock.send(data)
 
-    connection = ClientConnection(shutdown, spawn, send, write_blocks, resource_id, reverse)
+    connection = ClientSideConnection(shutdown, spawn, send, write_blocks, resource_id, reverse)
 
     nursery.start_soon(run_receive_loop, connection, sock, address, cancel_scope)
 

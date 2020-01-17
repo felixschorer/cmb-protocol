@@ -1,7 +1,7 @@
 import struct
 from argparse import ArgumentParser, FileType
 from ipaddress import ip_address
-from cmb_protocol.constants import DEFAULT_PORT, DEFAULT_IP_ADDR
+from cmb_protocol.constants import DEFAULT_PORT, DEFAULT_IP_ADDR, RESOURCE_ID_STRUCT_FORMAT
 from cmb_protocol.helpers import get_logger, enable_verbose_logging
 
 logger = get_logger(__file__)
@@ -87,7 +87,7 @@ def main():
 
         resource_id, output = getattr(args, RESOURCE_ID), getattr(args, OUTPUT)
         try:
-            parsed_resource_id = struct.unpack('!16sQ', bytes.fromhex(resource_id))
+            parsed_resource_id = struct.unpack(RESOURCE_ID_STRUCT_FORMAT, bytes.fromhex(resource_id))
         except ValueError:
             logger.error('%s is not a valid resource id', resource_id)
             exit(1)
