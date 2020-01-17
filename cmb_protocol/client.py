@@ -17,7 +17,10 @@ class ClientConnection(Connection):
         self.write_blocks = write_blocks
         self.resource_id = resource_id
         self.reverse = reverse
-        resource_request = RequestResource(flags=RequestResourceFlags.NONE, resource_id=bytes(16), block_offset=0)
+        resource_request = RequestResource(flags=RequestResourceFlags.NONE,
+                                           resource_id=bytes(16),
+                                           resource_length=0,
+                                           block_offset=0)
         spawn(send, resource_request)
 
     async def handle_packet(self, packet):
@@ -71,6 +74,7 @@ async def download(resource_id, file_writer, server_address, offloading_server_a
         async def write_blocks(blocks, reverse=False):
             if reverse:
                 await server_connection.send_stop()
+
             pass
 
         server_sock = socket.socket(family=get_ip_family(server_address), type=socket.SOCK_DGRAM)

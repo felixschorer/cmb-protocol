@@ -17,41 +17,21 @@ Bounded exponential back-off is used to resend the packet in case it got dropped
  16 |                                                                   |
     ├───────────────────────────────────────────────────────────────────┤
  20 |                                                                   |
+    |                          Resource Length                          |
+ 24 |                                                                   |
+    ├───────────────────────────────────────────────────────────────────┤
+ 28 |                                                                   |
     |                            Block Offset                           |
- 24 |                                                                   | 
+ 32 |                                                                   | 
     └───────────────────────────────────────────────────────────────────┘
 ```
 - Flags: 8 bit field for specifying various options
   - 0x01 REVERSE: Reverse the order in which the blocks are sent
 - Resource ID: 128 bit identifier of the requested resource
+- Resource Length: Length of the resource
 - Block Offset: 64 bit unsigned integer to resume the transfer from a previous connection
 
-## Data With Metadata
-Packets which are sent in response to a Resource Request packet.
-```
-     0                              15 16                             32
-    ┌─────────────────────────────────┬─────────────────────────────────┐
-  0 |              0xcb02             |            Reserved             |
-    ├─────────────────────────────────┴─────────────────────────────────┤
-  4 |                                                                   |
-    |                             Block ID                              |
-  8 |                                                                   |
-    ├───────────────────────────────────────────────────────────────────┤
- 12 |                                                                   |
-    ├ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ FEC Data  ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ┤
-  X |                                                                   | 
-    ├───────────────────────────────────────────────────────────────────┤
-X+4 |                                                                   |
-    |                           Resource Size                           |
-X+8 |                                                                   | 
-    └───────────────────────────────────────────────────────────────────┘
-```
-- Block ID: 64 bit identifier of the block this packet belongs to
-- FEC Data: Data of the resource encoded using forward error correction
-- Resource Size: Length of the resource in bytes (64 bit unsigned integer)
-
 ## Data
-Packets which are sent once the transmission metadata has been acknowledged.
 ```
      0                              15 16                             32
     ┌─────────────────────────────────┬─────────────────────────────────┐
@@ -83,15 +63,6 @@ Acknowledges the receipt of a block.
 ```
 - Block ID: 64 bit identifier of the block whose receipt has been acknowledged
 
-## Ack Metadata
-Acknowledges the receipt of transmission metadata.
-```
-     0                              15 16                             32
-    ┌─────────────────────────────────┬─────────────────────────────────┐
-  0 |              0xcb04             |            Reserved             |
-    └───────────────────────────────────────────────────────────────────┘
-```
-
 ## Nack Block
 Packet to notify the sender to send repair packets of the given block.
 ```
@@ -108,6 +79,7 @@ Packet to notify the sender to send repair packets of the given block.
 - Block ID: 64 bit identifier of the block whose receipt has been acknowledged
 
 ## Ack Opposite Range
+Send by send_stop by the client in order to stop the sending process.
 Acknowledges the receipt of a block range from the given block to the end of the block sequence.
 ```
      0                              15 16                             32
