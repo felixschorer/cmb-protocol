@@ -1,17 +1,14 @@
 import trio
 from trio import socket
-from cmb_protocol.packets import PacketType, DataWithMetadata, RequestResource
+
+from cmb_protocol.connection import Connection
+from cmb_protocol.packets import PacketType, RequestResource, DataWithMetadata
 from cmb_protocol.helpers import spawn_child_nursery, get_logger, set_listen_address, set_remote_address, get_ip_family
 
 logger = get_logger(__name__)
 
 
-class Connection:
-    def __init__(self, shutdown, spawn, send):
-        self.shutdown = shutdown
-        self.spawn = spawn
-        self.send = send
-
+class ServerConnection(Connection):
     async def handle_packet(self, packet):
         if isinstance(packet, RequestResource):
             data_with_metadata = DataWithMetadata(resource_size=0, block_id=0, fec_data=bytes())
@@ -33,7 +30,7 @@ async def accept_connection(connections, udp_sock, nursery, address):
         data = packet.to_bytes()
         await udp_sock.sendto(data, address)
 
-    connections[address] = Connection(shutdown, spawn, send)
+    connections[address] = ServerConnection(shutdown, spawn, send)
     logger.debug('Accepted connection')
 
 
