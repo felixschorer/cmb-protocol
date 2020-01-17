@@ -17,7 +17,7 @@ async def init_protocol(sock):
 async def receive(sock):
     try:
         data, address = await sock.recvfrom(2048)
-    except ConnectionResetError:
+    except (ConnectionResetError, ConnectionRefusedError):
         # maybe handle this error
         # however, it is not guaranteed that we will receive an error when sending into the void
         pass

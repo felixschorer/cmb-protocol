@@ -43,7 +43,7 @@ async def run_accept_loop(udp_sock):
         while True:
             try:
                 data, address = await udp_sock.recvfrom(2048)
-            except ConnectionResetError:
+            except (ConnectionResetError, ConnectionRefusedError):
                 # ignore error as we can't infer which send operation failed
                 pass
             else:
