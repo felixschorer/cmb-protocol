@@ -1,4 +1,6 @@
 import logging
+import math
+
 import trio
 from ipaddress import ip_address, IPv6Address
 from contextvars import ContextVar
@@ -83,3 +85,7 @@ async def _run_nursery_until_event(send_channel, shutdown_trigger):
         async with send_channel:
             await send_channel.send(nursery)
     logger.debug('Stopped child nursery')
+
+
+def calculate_number_of_blocks(resource_length, block_size):
+    return math.ceil(resource_length / block_size)
