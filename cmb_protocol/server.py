@@ -73,19 +73,23 @@ def run(file_reader, addresses):
     resource_length = 0
     encoders = []
 
-    # read file, split file into blocks, create encoders for blocks, hash file, print file hash concatenated with length
+    # read file
     with file_reader:
         logger.debug('Reading from %s', file_reader.name)
 
+        # split file into blocks
         block_size = MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK
         for block in iter(partial(file_reader.read, block_size), b''):
             m.update(block)
+            # create encoders for blocks
             encoders.append(Encoder(block, MAXIMUM_TRANSMISSION_UNIT))
             resource_length += len(block)
 
+    # hash file
     resource_hash = m.digest()
     resource_id = (resource_hash, resource_length)
     packed_resource_id = struct.pack(RESOURCE_ID_STRUCT_FORMAT, *resource_id).hex()
 
+    # print file hash concatenated with length
     logger.debug('Serving resource %s', packed_resource_id)
     trio.run(listen_to_all, addresses, resource_id, encoders)
