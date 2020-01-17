@@ -150,30 +150,29 @@ class RequestResourceFlags(IntFlag):
 
 
 class RequestResource(Packet):
-    __slots__ = 'flags', 'resource_id', 'resource_length', 'block_offset'
+    __slots__ = 'flags', 'resource_id', 'block_offset'
 
     _packet_type_ = 0xcb00
 
     __format = '!B1s16sQQ'
 
-    def __init__(self, flags, resource_id, resource_length, block_offset):
+    def __init__(self, flags, resource_id, block_offset):
         super().__init__()
         assert isinstance(flags, RequestResourceFlags)
         self.flags = flags
         self.resource_id = resource_id
-        self.resource_length = resource_length
         self.block_offset = block_offset
 
     def _serialize_fields(self):
+        resource_hash, resource_length = self.resource_id
         return struct.pack(self.__format,
-                           self.flags, bytes(1), self.resource_id, self.resource_length, self.block_offset)
+                           self.flags, bytes(1), resource_hash, resource_length, self.block_offset)
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        flags, reserved, resource_id, resource_length, block_offset = struct.unpack(cls.__format, packet_bytes)
+        flags, reserved, resource_hash, resource_length, block_offset = struct.unpack(cls.__format, packet_bytes)
         return RequestResource(flags=RequestResourceFlags(flags),
-                               resource_id=resource_id,
-                               resource_length=resource_length,
+                               resource_id=(resource_hash, resource_length),
                                block_offset=block_offset)
 
 

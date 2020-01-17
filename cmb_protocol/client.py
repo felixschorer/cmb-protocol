@@ -1,4 +1,3 @@
-from contextlib import ExitStack
 from functools import partial
 
 import trio
@@ -18,8 +17,7 @@ class ClientConnection(Connection):
         self.resource_id = resource_id
         self.reverse = reverse
         resource_request = RequestResource(flags=RequestResourceFlags.NONE,
-                                           resource_id=bytes(16),
-                                           resource_length=0,
+                                           resource_id=self.resource_id,
                                            block_offset=0)
         spawn(send, resource_request)
 
@@ -101,6 +99,7 @@ async def download(resource_id, file_writer, server_address, offloading_server_a
         nursery.start_soon(run_connection, server_connection, server_sock, server_address, server_cancel_scope)
 
     # TODO: nursery stopped, persist file
+
 
 def run(resource_id, file_writer, server_address, offloading_server_address=None):
     logger.debug('Writing to %s', file_writer.name)

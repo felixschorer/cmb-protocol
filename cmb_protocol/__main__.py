@@ -1,3 +1,4 @@
+import struct
 from argparse import ArgumentParser, FileType
 from ipaddress import ip_address
 from cmb_protocol.constants import DEFAULT_PORT, DEFAULT_IP_ADDR
@@ -86,15 +87,11 @@ def main():
 
         resource_id, output = getattr(args, RESOURCE_ID), getattr(args, OUTPUT)
         try:
-            parsed_resource_id = bytes.fromhex(resource_id)
+            parsed_resource_id = struct.unpack('!16sQ', bytes.fromhex(resource_id))
         except ValueError:
             logger.error('%s is not a valid resource id', resource_id)
             exit(1)
         else:
-            if len(parsed_resource_id) != 16:
-                logger.error('%s is not a valid resource id', resource_id)
-                exit(1)
-
             from cmb_protocol.client import run
             run(resource_id=parsed_resource_id, file_writer=output, server_address=server_address,
                 offloading_server_address=offloading_server_address)

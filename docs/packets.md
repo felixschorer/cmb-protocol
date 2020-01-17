@@ -11,7 +11,7 @@ Bounded exponential back-off is used to resend the packet in case it got dropped
   4 |                                                                   |
     |                                                                   |
   8 |                                                                   |
-    |                            Resource ID                            |
+    |                           Resource Hash                           |
  12 |                                                                   |
     |                                                                   |
  16 |                                                                   |
@@ -27,7 +27,7 @@ Bounded exponential back-off is used to resend the packet in case it got dropped
 ```
 - Flags: 8 bit field for specifying various options
   - 0x01 REVERSE: Reverse the order in which the blocks are sent
-- Resource ID: 128 bit identifier of the requested resource
+- Resource Hash: 128 bit identifier of the requested resource
 - Resource Length: Length of the resource
 - Block Offset: 64 bit unsigned integer to resume the transfer from a previous connection
 
