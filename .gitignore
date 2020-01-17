@@ -2,6 +2,3 @@
 /.idea/*
 /raptorq/target/
 **/__pycache__/**
-
-!/.idea/runConfigurations/*
-!/.idea/cmb-protocol.iml
