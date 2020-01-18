@@ -20,6 +20,8 @@ class ClientSideConnection(Connection):
         self.resource_id = resource_id
         self.reverse = reverse
 
+        self.spawn(self.init_protocol)
+
     async def init_protocol(self):
         flags = RequestResourceFlags.REVERSE if self.reverse else RequestResourceFlags.NONE
         _, resource_length = self.resource_id

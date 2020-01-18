@@ -12,49 +12,45 @@ from cmb_protocol.helpers import get_logger, set_listen_address, set_remote_addr
 logger = get_logger(__name__)
 
 
-async def start_connection(nursery, address, write_blocks, resource_id, reverse):
-    sock = socket.socket(family=get_ip_family(address), type=socket.SOCK_DGRAM)
-    cancel_scope = trio.CancelScope()
+async def run_receive_loop(connections, server_address, write_blocks, resource_id, reverse):
+    async with trio.open_nursery() as nursery:
+        with socket.socket(family=get_ip_family(server_address), type=socket.SOCK_DGRAM) as udp_sock, \
+                trio.CancelScope() as cancel_scope:
 
-    child_nursery, shutdown_trigger = await spawn_child_nursery(nursery, shutdown_timeout=10)
+            await udp_sock.connect(server_address)
+            set_listen_address(udp_sock.getsockname())
+            set_remote_address(server_address)
 
-    def shutdown():
-        shutdown_trigger.set()
-        cancel_scope.cancel()
-        logger.debug('Closed connection')
+            child_nursery, shutdown_trigger = await spawn_child_nursery(nursery, shutdown_timeout=3)
 
-    spawn = child_nursery.start_soon
+            def shutdown():
+                del connections[reverse]
+                shutdown_trigger.set()
+                cancel_scope.cancel()
+                logger.debug('Closed connection')
 
-    async def send(packet):
-        data = packet.to_bytes()
-        await sock.send(data)
+            spawn = child_nursery.start_soon
 
-    connection = ClientSideConnection(shutdown, spawn, send, write_blocks, resource_id, reverse)
+            async def send(packet_to_send):
+                packet_bytes = packet_to_send.to_bytes()
+                await udp_sock.send(packet_bytes)
 
-    nursery.start_soon(run_receive_loop, connection, sock, address, cancel_scope)
+            connection = ClientSideConnection(shutdown, spawn, send, write_blocks, resource_id, reverse)
+            connections[reverse] = connection
 
-    return connection
-
-
-async def run_receive_loop(connection, udp_sock, server_address, cancel_scope):
-    with udp_sock, cancel_scope:
-        await udp_sock.connect(server_address)
-        set_listen_address(udp_sock.getsockname())
-        set_remote_address(server_address)
-
-        await connection.init_protocol()
-
-        while True:
-            try:
-                data, address = await udp_sock.recvfrom(2048)
-            except (ConnectionResetError, ConnectionRefusedError):
-                # maybe handle this error
-                # however, it is not guaranteed that we will receive an error when sending into the void
-                pass
-            else:
-                packet = PacketType.parse_packet(data)
-                logger.debug('Received %s', packet)
-                await connection.handle_packet(packet)
+            while True:
+                try:
+                    data = await udp_sock.recv(2048)
+                    packet = PacketType.parse_packet(data)
+                    logger.debug('Received %s', packet)
+                except (ConnectionResetError, ConnectionRefusedError):
+                    # maybe handle this error
+                    # however, it is not guaranteed that we will receive an error when sending into the void
+                    pass
+                except ValueError as exc:
+                    logger.exception(exc)
+                else:
+                    await connection.handle_packet(packet)
 
 
 async def fetch(resource_id, server_addresses):
@@ -73,7 +69,7 @@ async def fetch(resource_id, server_addresses):
 
     async with trio.open_nursery() as nursery:
         for reverse, address in server_addresses.items():
-            connections[reverse] = await start_connection(nursery, address, write_blocks, resource_id, reverse)
+            nursery.start_soon(run_receive_loop, connections, address, write_blocks, resource_id, reverse)
 
     assert all([block is not None for block in blocks])
 
