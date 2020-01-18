@@ -1,6 +1,6 @@
 import struct
 from abc import ABCMeta, ABC, abstractmethod
-from enum import unique, Enum, IntFlag
+from enum import unique, Enum, IntFlag, IntEnum
 
 
 class _PacketMeta(ABCMeta):
@@ -144,6 +144,7 @@ class NackBlock(Packet):
         return NackBlock(received_packets=received_packets, block_id=block_id)
 
 
+@unique
 class RequestResourceFlags(IntFlag):
     NONE = 0
     REVERSE = 1
@@ -174,6 +175,32 @@ class RequestResource(Packet):
         return RequestResource(flags=RequestResourceFlags(flags),
                                resource_id=(resource_hash, resource_length),
                                block_offset=block_offset)
+
+
+@unique
+class ErrorCode(IntEnum):
+    RESOURCE_NOT_FOUND = 0
+
+
+class Error(Packet):
+    __slots__ = 'error_code'
+
+    _packet_type_ = 0xcb07
+
+    __format = '!H'
+
+    def __init__(self, error_code):
+        super().__init__()
+        assert isinstance(error_code, ErrorCode)
+        self.error_code = error_code
+
+    def _serialize_fields(self):
+        return struct.pack(self.__format, self.error_code)
+
+    @classmethod
+    def _parse_fields(cls, packet_bytes):
+        error_code, = struct.unpack(cls.__format, packet_bytes)
+        return Error(error_code=ErrorCode(error_code))
 
 
 @unique

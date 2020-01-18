@@ -6,8 +6,8 @@ from trio import socket
 from cmb_protocol.connection import ClientSideConnection
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK
 from cmb_protocol.packets import PacketType
-from cmb_protocol.helpers import get_logger, set_listen_address, set_remote_address, get_ip_family, spawn_child_nursery, \
-    calculate_number_of_blocks
+from cmb_protocol.helpers import get_logger, set_listen_address, set_remote_address, get_ip_family, \
+    spawn_child_nursery, calculate_number_of_blocks
 
 logger = get_logger(__name__)
 

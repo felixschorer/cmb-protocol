@@ -76,11 +76,11 @@ def run(file_reader, addresses):
 
         # split file into blocks
         block_size = MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK
-        for block in iter(partial(file_reader.read, block_size), b''):
-            m.update(block)
+        for block_id, block_content in enumerate(iter(partial(file_reader.read, block_size), b'')):
+            m.update(block_content)
             # create encoders for blocks
-            encoders.append(Encoder(block, MAXIMUM_TRANSMISSION_UNIT))
-            resource_length += len(block)
+            encoders.append(Encoder(block_id, block_content, MAXIMUM_TRANSMISSION_UNIT))
+            resource_length += len(block_content)
 
     # hash file
     resource_hash = m.digest()

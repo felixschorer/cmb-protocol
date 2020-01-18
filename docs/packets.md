@@ -92,3 +92,13 @@ Acknowledges the receipt of a block range from the given block to the end of the
     └───────────────────────────────────────────────────────────────────┘
 ```
 - Block ID: 64 bit identifier of the block who marks the start of the range
+
+## Error
+Generic error packet that can be identified by its Error Code
+```
+     0                              15 16                             32
+    ┌─────────────────────────────────┬─────────────────────────────────┐
+  0 |              0xcb07             |           Error Code            |
+    └─────────────────────────────────┴─────────────────────────────────┘
+```
+- Error Code: 16 bit error code

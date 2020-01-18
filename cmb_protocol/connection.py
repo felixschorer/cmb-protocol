@@ -1,6 +1,9 @@
+import trio
+
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK
 from cmb_protocol.helpers import calculate_number_of_blocks
-from cmb_protocol.packets import RequestResourceFlags, RequestResource, Data
+from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
+    Error, ErrorCode
 
 
 class Connection:
@@ -33,7 +36,7 @@ class ClientSideConnection(Connection):
         await self.send(resource_request)
 
     async def handle_packet(self, packet):
-        self.shutdown()
+        pass
 
     async def send_stop(self, block_id):
         pass
@@ -44,9 +47,39 @@ class ServerSideConnection(Connection):
         super().__init__(shutdown, spawn, send)
         self.resource_id = resource_id
         self.encoders = encoders
+        self.connected = False
+
+    async def handle_request_resource(self, packet):
+        if self.resource_id != packet.resource_id:
+            await self.send(Error(ErrorCode.RESOURCE_NOT_FOUND))
+            self.shutdown()
+        elif not self.connected:
+            self.connected = True
+            self.spawn(self.send_blocks, packet.flags is RequestResourceFlags.REVERSE)
+        else:
+            pass  # already connected and sending
+
+    async def send_blocks(self, reverse):
+        for encoder in reversed(self.encoders) if reverse else self.encoders:
+            for packet in encoder.source_packets:
+                await self.send(packet)
+                await trio.sleep(1)
+
+    async def handle_ack_block(self, packet):
+        pass
+
+    async def handle_nack_block(self, packet):
+        pass
+
+    async def handle_ack_opposite_range(self, packet):
+        pass
 
     async def handle_packet(self, packet):
         if isinstance(packet, RequestResource):
-            data = Data(block_id=0, fec_data=bytes())
-            await self.send(data)
-        self.shutdown()
+            await self.handle_request_resource(packet)
+        elif isinstance(packet, AckBlock):
+            await self.handle_ack_block(packet)
+        elif isinstance(packet, NackBlock):
+            await self.handle_nack_block(packet)
+        elif isinstance(packet, AckOppositeRange):
+            await self.handle_ack_opposite_range(packet)
