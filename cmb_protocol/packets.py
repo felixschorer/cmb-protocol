@@ -214,6 +214,7 @@ class PacketType(Enum):
     ACK_BLOCK = AckBlock
     NACK_BLOCK = NackBlock
     ACK_OPPOSITE_RANGE = AckOppositeRange
+    ERROR = Error
 
     def __new__(cls, packet_cls):
         assert issubclass(packet_cls, Packet)
