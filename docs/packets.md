@@ -88,7 +88,7 @@ Acknowledges the receipt of a block range from the given block to the end of the
   4 |                         Stop at Block ID                          |
     └───────────────────────────────────────────────────────────────────┘
 ```
-- Stop at Block ID: 64 bit identifier of the block who marks the start of the acknowledged range
+- Stop at Block ID: 48 bit identifier of the block who marks the start of the acknowledged range
 
 ## Error
 Generic error packet that can be identified by its Error Code
