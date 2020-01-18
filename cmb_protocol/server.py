@@ -8,7 +8,7 @@ from cmb_protocol.coding import Encoder
 from cmb_protocol.connection import ServerSideConnection
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK, RESOURCE_ID_STRUCT_FORMAT
 from cmb_protocol.packets import PacketType, RequestResource
-from cmb_protocol.helpers import spawn_child_nursery, get_ip_family
+from cmb_protocol.helpers import spawn_child_nursery, get_ip_family, once
 from cmb_protocol import log_util
 
 logger = log_util.get_logger(__name__)
@@ -17,6 +17,28 @@ logger = log_util.get_logger(__name__)
 async def run_accept_loop(udp_sock, resource_id, encoders):
     async with trio.open_nursery() as nursery:
         connections = dict()
+
+        # inner function to create a closure around client_address
+        async def accept_connection(client_address):
+            child_nursery, shutdown_trigger = await spawn_child_nursery(nursery, shutdown_timeout=3)
+
+            @once
+            def shutdown():
+                # trigger child nursery timeout
+                shutdown_trigger.set()
+                # remove from dict to prevent handling of future packets
+                del connections[client_address]
+                logger.debug('Closed connection')
+
+            spawn = child_nursery.start_soon
+
+            async def send(packet_to_send):
+                packet_bytes = packet_to_send.to_bytes()
+                await udp_sock.sendto(packet_bytes, client_address)
+
+            connections[client_address] = ServerSideConnection(shutdown, spawn, send, resource_id, encoders)
+            logger.debug('Accepted connection')
+
         while True:
             try:
                 data, address = await udp_sock.recvfrom(2048)
@@ -34,24 +56,7 @@ async def run_accept_loop(udp_sock, resource_id, encoders):
                 if address not in connections:
                     if not isinstance(packet, RequestResource):
                         continue
-
-                    child_nursery, shutdown_trigger = await spawn_child_nursery(nursery, shutdown_timeout=3)
-
-                    def shutdown():
-                        # trigger child nursery timeout
-                        shutdown_trigger.set()
-                        # remove from dict to prevent handling of future packets
-                        del connections[address]
-                        logger.debug('Closed connection')
-
-                    spawn = child_nursery.start_soon
-
-                    async def send(packet_to_send):
-                        packet_bytes = packet_to_send.to_bytes()
-                        await udp_sock.sendto(packet_bytes, address)
-
-                    connections[address] = ServerSideConnection(shutdown, spawn, send, resource_id, encoders)
-                    logger.debug('Accepted connection')
+                    await accept_connection(address)
 
                 await connections[address].handle_packet(packet)
 

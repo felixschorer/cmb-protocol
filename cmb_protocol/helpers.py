@@ -1,5 +1,6 @@
 import math
 import struct
+from functools import wraps
 
 import trio
 from ipaddress import ip_address, IPv6Address
@@ -42,10 +43,6 @@ async def _run_nursery_until_event(send_channel, shutdown_trigger, shutdown_time
         logger.debug('Child nursery shut down')
 
 
-def calculate_number_of_blocks(resource_length, block_size):
-    return math.ceil(resource_length / block_size)
-
-
 def pack_uint48(uint48):
     assert uint48 < 2**48
     return struct.pack('!Q', uint48)[-6:]
@@ -55,3 +52,16 @@ def unpack_uint48(buffer):
     assert len(buffer) == 6
     uint48, = struct.unpack('!Q', bytes(2) + buffer)
     return uint48
+
+
+def once(func):
+    has_been_called = False
+
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        nonlocal has_been_called
+        if not has_been_called:
+            has_been_called = True
+            func(*args, **kwargs)
+
+    return wrapped

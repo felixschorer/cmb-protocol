@@ -2,9 +2,9 @@ import trio
 from trio import socket
 
 from cmb_protocol.connection import ClientSideConnection
-from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK
+from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK, calculate_number_of_blocks
 from cmb_protocol.packets import PacketType
-from cmb_protocol.helpers import get_ip_family, spawn_child_nursery, calculate_number_of_blocks
+from cmb_protocol.helpers import get_ip_family, spawn_child_nursery, once
 from cmb_protocol import log_util
 
 logger = log_util.get_logger(__name__)
@@ -21,6 +21,7 @@ async def run_receive_loop(connection_opened, connection_closed, write_blocks, s
             log_util.set_listen_address(udp_sock.getsockname())
             log_util.set_remote_address(server_address)
 
+            @once
             def shutdown():
                 # coordinate shutdown with higher order protocol instance
                 connection_closed()
@@ -58,29 +59,32 @@ async def run_receive_loop(connection_opened, connection_closed, write_blocks, s
 
 async def fetch(resource_id, server_addresses):
     _, resource_length = resource_id
-    block_size = MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK
-    blocks = [None] * calculate_number_of_blocks(resource_length, block_size)
+    blocks = [None] * calculate_number_of_blocks(resource_length)
 
     async with trio.open_nursery() as nursery:
         connections = dict()  # reverse -> connection
 
-        for reverse, address in server_addresses.items():
+        # inner function to create a closure around reverse_direction and server_address
+        def spawn_connection(reverse_direction, server_address):
             def connection_opened(connection):
-                connections[reverse] = connection
+                connections[reverse_direction] = connection
 
             def connection_closed():
-                del connections[reverse]
+                del connections[reverse_direction]
 
             async def write_blocks(offset, received_blocks):
                 # TODO: maybe need to reverse received blocks if reversed=True
                 blocks[offset:offset + len(received_blocks)] = received_blocks
 
-                if (not reverse) in connections:
-                    await connections[not reverse].send_stop(
-                        offset if reverse else offset + len(received_blocks) - 1)
+                if (not reverse_direction) in connections:
+                    stop_at_block_id = offset if reverse_direction else offset + len(received_blocks) - 1
+                    await connections[not reverse_direction].send_stop(stop_at_block_id)
 
-            nursery.start_soon(run_receive_loop, connection_opened, connection_closed, write_blocks, address,
-                               resource_id, reverse)
+            nursery.start_soon(run_receive_loop, connection_opened, connection_closed, write_blocks, server_address,
+                               resource_id, reverse_direction)
+
+        for reverse, address in server_addresses.items():
+            spawn_connection(reverse, address)
 
     assert all([block is not None for block in blocks])
 
@@ -88,6 +92,10 @@ async def fetch(resource_id, server_addresses):
 
 
 def run(resource_id, file_writer, server_addresses):
+    if hasattr(file_writer, 'buffer'):
+        # in case of stdout we have to use the buffer to write binary data
+        file_writer = file_writer.buffer
+
     logger.debug('Writing to %s', file_writer.name)
 
     blocks = trio.run(fetch, resource_id, server_addresses)

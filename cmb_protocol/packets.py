@@ -161,23 +161,23 @@ class NackBlock(Packet):
 
 
 class AckOppositeRange(Packet):
-    __slots__ = 'block_id'
+    __slots__ = 'stop_at_block_id',
 
     _packet_type_ = 0xcb06
 
     __format = '!6s'
 
-    def __init__(self, block_id):
+    def __init__(self, stop_at_block_id):
         super().__init__()
-        self.block_id = block_id
+        self.stop_at_block_id = stop_at_block_id
 
     def _serialize_fields(self):
-        return struct.pack(self.__format, pack_uint48(self.block_id))
+        return struct.pack(self.__format, pack_uint48(self.stop_at_block_id))
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        block_id, = struct.unpack(cls.__format, packet_bytes)
-        return AckOppositeRange(block_id=unpack_uint48(block_id))
+        stop_at_block_id, = struct.unpack(cls.__format, packet_bytes)
+        return AckOppositeRange(stop_at_block_id=unpack_uint48(stop_at_block_id))
 
 
 @unique
