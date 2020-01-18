@@ -14,7 +14,7 @@ class Connection:
 
 
 class ClientSideConnection(Connection):
-    def __init__(self, shutdown, spawn, send, write_blocks, resource_id, reverse=False):
+    def __init__(self, shutdown, spawn, send, write_blocks, resource_id, reverse):
         super().__init__(shutdown, spawn, send)
         self.write_blocks = write_blocks
         self.resource_id = resource_id

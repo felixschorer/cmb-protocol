@@ -57,42 +57,33 @@ async def run_receive_loop(connection, udp_sock, server_address, cancel_scope):
                 await connection.handle_packet(packet)
 
 
-async def download(resource_id, server_address, offloading_server_address=None):
+async def fetch(resource_id, server_addresses):
+    connections = dict()  # reverse -> connection
+
+    _, resource_length = resource_id
+    block_size = MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK
+    blocks = [None] * calculate_number_of_blocks(resource_length, block_size)
+
+    async def write_blocks(offset, received_blocks, from_reverse):
+        # TODO: maybe need to reverse received blocks if reversed=True
+        blocks[offset:offset + len(received_blocks)] = received_blocks
+
+        if (not from_reverse) in connections:
+            await connections[not from_reverse].send_stop(offset if from_reverse else offset + len(received_blocks) - 1)
+
     async with trio.open_nursery() as nursery:
-        server_connection, offloading_server_connection = None, None
-
-        _, resource_length = resource_id
-        block_size = MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK
-        blocks = [None] * calculate_number_of_blocks(resource_length, block_size)
-
-        async def write_blocks(offset, received_blocks, reverse=False):
-            # TODO: maybe need to reverse received blocks if reversed=True
-            blocks[offset:offset + len(received_blocks)] = received_blocks
-
-            if reverse:
-                await server_connection.send_stop(offset)
-            elif offloading_server_address:
-                await offloading_server_connection.send_stop(offset + len(received_blocks) - 1)
-
-        # start from beginning of file
-        server_connection = await start_connection(nursery, server_address, partial(write_blocks, reverse=False),
-                                                   resource_id, reverse=False)
-
-        # start from end of file as well (if offloading address specified)
-        if offloading_server_address:
-            offloading_server_connection = await start_connection(nursery, offloading_server_address,
-                                                                  partial(write_blocks, reverse=True),
-                                                                  resource_id, reverse=True)
+        for reverse, address in server_addresses.items():
+            connections[reverse] = await start_connection(nursery, address, write_blocks, resource_id, reverse)
 
     assert all([block is not None for block in blocks])
 
     return blocks
 
 
-def run(resource_id, file_writer, server_address, offloading_server_address=None):
+def run(resource_id, file_writer, server_addresses):
     logger.debug('Writing to %s', file_writer.name)
 
-    blocks = trio.run(download, resource_id, server_address, offloading_server_address)
+    blocks = trio.run(fetch, resource_id, server_addresses)
 
     with file_writer:
         for block in blocks:

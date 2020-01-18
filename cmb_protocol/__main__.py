@@ -83,7 +83,7 @@ def main():
             logger.error('Expected at most 2 addresses, %d were given', len(addresses))
             exit(1)
 
-        server_address, offloading_server_address = addresses[0], addresses[1] if len(addresses) == 2 else None
+        server_addresses = {reverse: server_address for reverse, server_address in zip([False, True], addresses)}
 
         resource_id, output = getattr(args, RESOURCE_ID), getattr(args, OUTPUT)
         try:
@@ -93,8 +93,7 @@ def main():
             exit(1)
         else:
             from cmb_protocol.client import run
-            run(resource_id=parsed_resource_id, file_writer=output, server_address=server_address,
-                offloading_server_address=offloading_server_address)
+            run(resource_id=parsed_resource_id, file_writer=output, server_addresses=server_addresses)
 
     elif mode == SERVER:
         file_type = getattr(args, FILE)
