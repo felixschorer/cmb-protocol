@@ -2,6 +2,8 @@ import struct
 from abc import ABCMeta, ABC, abstractmethod
 from enum import unique, Enum, IntFlag, IntEnum
 
+from cmb_protocol.helpers import unpack_uint48, pack_uint48
+
 
 class _PacketMeta(ABCMeta):
     """
@@ -108,15 +110,13 @@ class Data(Packet):
         self.timestamp = timestamp
 
     def _serialize_fields(self):
-        block_id_bytes = struct.pack('!Q', self.block_id)[-6:]
-        return struct.pack(self.__format, block_id_bytes, self.timestamp) + self.fec_data
+        return struct.pack(self.__format, pack_uint48(self.block_id), self.timestamp) + self.fec_data
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        block_id_bytes, timestamp = struct.unpack(cls.__format, packet_bytes[:cls.__format_size])
-        block_id, = struct.unpack('!Q', bytes(2) + block_id_bytes)
+        block_id, timestamp = struct.unpack(cls.__format, packet_bytes[:cls.__format_size])
         fec_data = packet_bytes[cls.__format_size:]
-        return Data(block_id=block_id, timestamp=timestamp, fec_data=fec_data)
+        return Data(block_id=unpack_uint48(block_id), timestamp=timestamp, fec_data=fec_data)
 
 
 class AckBlock(Packet):
@@ -131,14 +131,12 @@ class AckBlock(Packet):
         self.block_id = block_id
 
     def _serialize_fields(self):
-        block_id_bytes = struct.pack('!Q', self.block_id)[-6:]
-        return struct.pack(self.__format, block_id_bytes)
+        return struct.pack(self.__format, pack_uint48(self.block_id))
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        block_id_bytes, = struct.unpack(cls.__format, packet_bytes)
-        block_id, = struct.unpack('!Q', bytes(2) + block_id_bytes)
-        return AckBlock(block_id=block_id)
+        block_id, = struct.unpack(cls.__format, packet_bytes)
+        return AckBlock(block_id=unpack_uint48(block_id))
 
 
 class NackBlock(Packet):
@@ -154,14 +152,12 @@ class NackBlock(Packet):
         self.block_id = block_id
 
     def _serialize_fields(self):
-        block_id_bytes = struct.pack('!Q', self.block_id)[-6:]
-        return struct.pack(self.__format, block_id_bytes, self.received_packets)
+        return struct.pack(self.__format, pack_uint48(self.block_id), self.received_packets)
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        block_id_bytes, received_packets = struct.unpack(cls.__format, packet_bytes)
-        block_id, = struct.unpack('!Q', bytes(2) + block_id_bytes)
-        return NackBlock(block_id=block_id, received_packets=received_packets)
+        block_id, received_packets = struct.unpack(cls.__format, packet_bytes)
+        return NackBlock(block_id=unpack_uint48(block_id), received_packets=received_packets)
 
 
 class AckOppositeRange(Packet):
@@ -176,14 +172,12 @@ class AckOppositeRange(Packet):
         self.block_id = block_id
 
     def _serialize_fields(self):
-        block_id_bytes = struct.pack('!Q', self.block_id)[-6:]
-        return struct.pack(self.__format, block_id_bytes)
+        return struct.pack(self.__format, pack_uint48(self.block_id))
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        block_id_bytes, = struct.unpack(cls.__format, packet_bytes)
-        block_id, = struct.unpack('!Q', bytes(2) + block_id_bytes)
-        return AckBlock(block_id=block_id)
+        block_id, = struct.unpack(cls.__format, packet_bytes)
+        return AckOppositeRange(block_id=unpack_uint48(block_id))
 
 
 @unique

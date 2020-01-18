@@ -1,4 +1,6 @@
 import math
+import struct
+
 import trio
 from ipaddress import ip_address, IPv6Address
 from trio import Event, socket
@@ -42,3 +44,14 @@ async def _run_nursery_until_event(send_channel, shutdown_trigger, shutdown_time
 
 def calculate_number_of_blocks(resource_length, block_size):
     return math.ceil(resource_length / block_size)
+
+
+def pack_uint48(uint48):
+    assert uint48 < 2**48
+    return struct.pack('!Q', uint48)[-6:]
+
+
+def unpack_uint48(buffer):
+    assert len(buffer) == 6
+    uint48, = struct.unpack('!Q', bytes(2) + buffer)
+    return uint48
