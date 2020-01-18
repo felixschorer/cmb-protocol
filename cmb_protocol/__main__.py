@@ -2,9 +2,9 @@ import struct
 from argparse import ArgumentParser, FileType
 from ipaddress import ip_address
 from cmb_protocol.constants import DEFAULT_PORT, DEFAULT_IP_ADDR, RESOURCE_ID_STRUCT_FORMAT
-from cmb_protocol.helpers import get_logger, enable_verbose_logging
+from cmb_protocol import log_util
 
-logger = get_logger(__file__)
+logger = log_util.get_logger(__file__)
 
 MODE = 'mode'
 CLIENT = 'client'
@@ -43,7 +43,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    enable_verbose_logging(getattr(args, VERBOSE))
+    log_util.enable_verbose_logging(getattr(args, VERBOSE))
 
     mode, ip_addrs, ports = getattr(args, MODE), getattr(args, IP_ADDR), getattr(args, PORT)
 

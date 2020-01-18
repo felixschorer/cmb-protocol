@@ -1,33 +1,32 @@
-from functools import partial
-
 import trio
 from trio import socket
 
 from cmb_protocol.connection import ClientSideConnection
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK
 from cmb_protocol.packets import PacketType
-from cmb_protocol.helpers import get_logger, set_listen_address, set_remote_address, get_ip_family, \
-    spawn_child_nursery, calculate_number_of_blocks
+from cmb_protocol.helpers import get_ip_family, spawn_child_nursery, calculate_number_of_blocks
+from cmb_protocol import log_util
 
-logger = get_logger(__name__)
+logger = log_util.get_logger(__name__)
 
 
 async def run_receive_loop(connection_opened, connection_closed, write_blocks, server_address, resource_id, reverse):
     async with trio.open_nursery() as nursery:
         child_nursery, shutdown_trigger = await spawn_child_nursery(nursery, shutdown_timeout=3)
 
-        with socket.socket(family=get_ip_family(server_address), type=socket.SOCK_DGRAM) as udp_sock, \
-                trio.CancelScope() as cancel_scope:
+        with trio.CancelScope() as cancel_scope, \
+                socket.socket(family=get_ip_family(server_address), type=socket.SOCK_DGRAM) as udp_sock:
 
             await udp_sock.connect(server_address)
-            set_listen_address(udp_sock.getsockname())
-            set_remote_address(server_address)
+            log_util.set_listen_address(udp_sock.getsockname())
+            log_util.set_remote_address(server_address)
 
             def shutdown():
                 # coordinate shutdown with higher order protocol instance
                 connection_closed()
-
+                # trigger child nursery timeout
                 shutdown_trigger.set()
+                # cancel receive loop
                 cancel_scope.cancel()
                 logger.debug('Closed connection')
 
