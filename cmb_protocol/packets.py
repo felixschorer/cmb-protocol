@@ -199,5 +199,8 @@ class PacketType(Enum):
 
     @classmethod
     def parse_packet(cls, packet_bytes):
-        packet_type = Packet.extract_packet_type(packet_bytes)
-        return cls(packet_type).packet_cls.from_bytes(packet_bytes)
+        try:
+            packet_type = Packet.extract_packet_type(packet_bytes)
+            return cls(packet_type).packet_cls.from_bytes(packet_bytes)
+        except Exception as exc:
+            raise ValueError('Failed to parse bytes into packet') from exc
