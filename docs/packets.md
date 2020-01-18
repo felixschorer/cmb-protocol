@@ -35,18 +35,19 @@ Bounded exponential back-off is used to resend the packet in case it got dropped
 ```
      0                              15 16                             32
     ┌─────────────────────────────────┬─────────────────────────────────┐
-  0 |              0xcb01             |            Reserved             |
-    ├─────────────────────────────────┴─────────────────────────────────┤
-  4 |                                                                   |
-    |                             Block ID                              |
-  8 |                                                                   |
+  0 |              0xcb01             |                                 |
+    ├─────────────────────────────────┘                                 |
+  4 |                             Block ID                              |
+    ├───────────────────────────────────────────────────────────────────┤
+  8 |                            Timestamp                              |
     ├───────────────────────────────────────────────────────────────────┤
  12 |                                                                   |
     ├ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ FEC Data  ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ┤
   X |                                                                   | 
     └───────────────────────────────────────────────────────────────────┘
 ```
-- Block ID: 64 bit identifier of the block this packet belongs to
+- Block ID: 48 bit identifier of the block this packet belongs to
+- Timestamp: 32 bit timestamp in milliseconds starting at 0
 - FEC Data: Data of the resource encoded using forward error correction
 
 ## Ack Block
@@ -54,29 +55,27 @@ Acknowledges the receipt of a block.
 ```
      0                              15 16                             32
     ┌─────────────────────────────────┬─────────────────────────────────┐
-  0 |              0xcb03             |            Reserved             |
-    ├─────────────────────────────────┴─────────────────────────────────┤
-  4 |                                                                   |
-    |                             Block ID                              |
-  8 |                                                                   |
+  0 |              0xcb03             |                                 |
+    ├─────────────────────────────────┘                                 |
+  4 |                             Block ID                              |
     └───────────────────────────────────────────────────────────────────┘
 ```
-- Block ID: 64 bit identifier of the block whose receipt has been acknowledged
+- Block ID: 48 bit identifier of the block whose receipt has been acknowledged
 
 ## Nack Block
 Packet to notify the sender to send repair packets of the given block.
 ```
      0                              15 16                             32
     ┌─────────────────────────────────┬─────────────────────────────────┐
-  0 |              0xcb05             |        Received Packets         |
-    ├─────────────────────────────────┴─────────────────────────────────┤
-  4 |                                                                   |
-    |                             Block ID                              |
-  8 |                                                                   |
-    └───────────────────────────────────────────────────────────────────┘
+  0 |              0xcb05             |                                 |
+    ├─────────────────────────────────┘                                 |
+  4 |                             Block ID                              |
+    ├─────────────────────────────────┬─────────────────────────────────┘
+  8 |        Received Packets         | 
+    └─────────────────────────────────┘
 ```
+- Block ID: 48 bit identifier of the block whose receipt has been acknowledged
 - Received Packets: Number of packets of this block which have been received (16 bit unsigned integer)
-- Block ID: 64 bit identifier of the block whose receipt has been acknowledged
 
 ## Ack Opposite Range
 Send by send_stop by the client in order to stop the sending process.
@@ -84,11 +83,9 @@ Acknowledges the receipt of a block range from the given block to the end of the
 ```
      0                              15 16                             32
     ┌─────────────────────────────────┬─────────────────────────────────┐
-  0 |              0xcb06             |            Reserved             |
-    ├─────────────────────────────────┴─────────────────────────────────┤
-  4 |                                                                   |
-    |                             Block ID                              |
-  8 |                                                                   |
+  0 |              0xcb06             |                                 |
+    ├─────────────────────────────────┘                                 |
+  4 |                             Block ID                              |
     └───────────────────────────────────────────────────────────────────┘
 ```
 - Block ID: 64 bit identifier of the block who marks the start of the range
