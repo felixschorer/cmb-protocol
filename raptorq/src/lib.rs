@@ -3,10 +3,75 @@ use pyo3::types::*;
 use raptorq::{
     Encoder as EncoderNative,
     Decoder as DecoderNative,
+    SourceBlockEncoder as SourceBlockEncoderNative,
+    SourceBlockDecoder as SourceBlockDecoderNative,
     ObjectTransmissionInformation,
     EncodingPacket,
 };
 
+
+#[pyclass]
+struct SourceBlockEncoder {
+    encoder: SourceBlockEncoderNative
+}
+
+#[pymethods]
+impl SourceBlockEncoder {
+    #[new]
+    fn new(obj: &PyRawObject, source_block_id: u8, symbol_size: u16, data: &PyBytes) {
+        let encoder = SourceBlockEncoderNative::new(source_block_id, symbol_size, data.as_bytes());
+        obj.init({
+            SourceBlockEncoder { encoder }
+        });
+    }
+
+    pub fn source_packets<'p>(&self,
+        py: Python<'p>,
+    ) -> PyResult<Vec<&'p PyBytes>> {
+        let packets: Vec<&PyBytes> = self.encoder.source_packets()
+            .iter()
+            .map(|packet| PyBytes::new(py, &packet.serialize()))
+            .collect();
+
+        Ok(packets)
+    }
+
+    pub fn repair_packets<'p>(&self, py: Python<'p>, start_repair_symbol_id: u32, packets: u32) -> PyResult<Vec<&'p PyBytes>> {
+        let packets: Vec<&PyBytes> = self.encoder.repair_packets(start_repair_symbol_id, packets)
+            .iter()
+            .map(|packet| PyBytes::new(py, &packet.serialize()))
+            .collect();
+
+        Ok(packets)
+    }
+}
+
+#[pyclass]
+struct SourceBlockDecoder {
+    decoder: SourceBlockDecoderNative
+}
+
+#[pymethods]
+impl SourceBlockDecoder {
+    #[new]
+    fn new(obj: &PyRawObject, source_block_id: u8, symbol_size: u16, block_length: u64) {
+        let decoder = SourceBlockDecoderNative::new(source_block_id, symbol_size, block_length);
+        obj.init({
+            SourceBlockDecoder { decoder }
+        });
+    }
+
+    pub fn decode<'p>(&mut self, py: Python<'p>, packets: &PyList) -> PyResult<Option<&'p PyBytes>> {
+        let mut unpacked_packets: Vec<EncodingPacket> = Vec::new();
+        for n in 0..packets.len() {
+            let any = packets.get_item(n as isize);
+            let bytes = any.downcast_ref::<PyBytes>()?;
+            unpacked_packets.push(EncodingPacket::deserialize(bytes.as_bytes()));
+        }
+        let result = self.decoder.decode(unpacked_packets);
+        Ok(result.map(|data| PyBytes::new(py, &data)))
+    }
+}
 
 #[pyclass]
 struct Encoder {
@@ -59,6 +124,8 @@ impl Decoder {
 
 #[pymodule]
 fn raptorq(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<SourceBlockEncoder>()?;
+    m.add_class::<SourceBlockDecoder>()?;
     m.add_class::<Encoder>()?;
     m.add_class::<Decoder>()?;
     Ok(())

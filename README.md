@@ -1,7 +1,7 @@
 # CMB Protocol
 ## Installation
 ### Prerequisites
-- [Python](https://www.python.org/downloads/) in version 3.6 or higher
+- [Python](https://www.python.org/downloads/) in version 3.5 or higher
   - check the installed version with `python3 --version`
 - [rustup](https://rustup.rs/) for managing Rust toolchains
 
@@ -54,12 +54,12 @@ $ source venv/bin/activate
 
 ### Running the server
 ```
-(venv) $ python3 src/server.py
+(venv) $ python3 -m cmb_protocol server
 ```
 
 ### Running the client
 ```
-(venv) $ python3 src/client.py
+(venv) $ python3 -m cmb_protocol client
 ```
 
 ## Installing and running on Windows
