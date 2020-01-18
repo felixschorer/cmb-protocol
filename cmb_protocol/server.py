@@ -76,7 +76,7 @@ async def serve(addresses, resource_id, encoders):
 
 
 def run(file_reader, addresses):
-    m = hashlib.md5()
+    md5 = hashlib.md5()
     resource_length = 0
     encoders = OrderedDict()  # block_id -> encoder
 
@@ -86,11 +86,11 @@ def run(file_reader, addresses):
         # split file into blocks
         block_size = MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK
         for block_id, block_content in enumerate(iter(partial(file_reader.read, block_size), b'')):
-            m.update(block_content)
+            md5.update(block_content)
             resource_length += len(block_content)
             encoders[block_id] = Encoder(block_content, MAXIMUM_TRANSMISSION_UNIT)
 
-    resource_hash = m.digest()
+    resource_hash = md5.digest()
     resource_id = (resource_hash, resource_length)
     packed_resource_id = struct.pack(RESOURCE_ID_STRUCT_FORMAT, *resource_id).hex()
 

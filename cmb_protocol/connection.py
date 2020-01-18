@@ -163,7 +163,7 @@ class ServerSideConnection(Connection):
 
     async def handle_ack_opposite_range(self, packet):
         current, new = self.stop_at_block_id, packet.stop_at_block_id
-        recent = current >= new if self.reverse else current <= new
+        recent = current <= new if self.reverse else current >= new
         if recent:
             self.stop_at_block_id = new
 

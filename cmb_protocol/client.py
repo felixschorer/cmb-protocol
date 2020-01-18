@@ -1,3 +1,5 @@
+import hashlib
+
 import trio
 from trio import socket
 
@@ -58,7 +60,7 @@ async def run_receive_loop(connection_opened, connection_closed, write_blocks, s
 
 
 async def fetch(resource_id, server_addresses):
-    _, resource_length = resource_id
+    resource_hash, resource_length = resource_id
     blocks = [None] * calculate_number_of_blocks(resource_length)
 
     async with trio.open_nursery() as nursery:
@@ -86,7 +88,10 @@ async def fetch(resource_id, server_addresses):
         for reverse, address in server_addresses.items():
             spawn_connection(reverse, address)
 
-    assert all([block is not None for block in blocks])
+    md5 = hashlib.md5()
+    for block in blocks:
+        md5.update(block)
+    assert md5.digest() == resource_hash
 
     return blocks
 
