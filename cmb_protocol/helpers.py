@@ -1,6 +1,5 @@
 import logging
 import math
-
 import trio
 from ipaddress import ip_address, IPv6Address
 from contextvars import ContextVar
@@ -70,21 +69,31 @@ def update_logging_context(**kwargs):
 logger = get_logger(__name__)
 
 
-async def spawn_child_nursery(nursery):
+async def spawn_child_nursery(nursery, shutdown_timeout=math.inf):
     send_channel, receive_channel = trio.open_memory_channel(0)
     async with receive_channel:
         shutdown_trigger = Event()
-        nursery.start_soon(_run_nursery_until_event, send_channel, shutdown_trigger)
+        nursery.start_soon(_run_nursery_until_event, send_channel, shutdown_trigger, shutdown_timeout)
         return await receive_channel.receive(), shutdown_trigger
 
 
-async def _run_nursery_until_event(send_channel, shutdown_trigger):
+async def _run_nursery_until_event(send_channel, shutdown_trigger, shutdown_timeout):
     logger.debug('Starting child nursery')
     async with trio.open_nursery() as nursery:
-        nursery.start_soon(shutdown_trigger.wait)
+        async def shutdown():
+            await shutdown_trigger.wait()
+            nursery.cancel_scope.deadline = trio.current_time() + shutdown_timeout
+            logger.debug('Giving child nursery %.3f seconds to shut down...', shutdown_timeout)
+
+        nursery.start_soon(shutdown)
+
         async with send_channel:
             await send_channel.send(nursery)
-    logger.debug('Stopped child nursery')
+
+    if nursery.cancel_scope.cancelled_caught:
+        logger.warning('Forcefully stopped child nursery')
+    else:
+        logger.debug('Child nursery shut down')
 
 
 def calculate_number_of_blocks(resource_length, block_size):

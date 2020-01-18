@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 
 
 async def accept_connection(nursery, connections, udp_sock, address, resource_id, encoders):
-    child_nursery, shutdown_trigger = await spawn_child_nursery(nursery)
+    child_nursery, shutdown_trigger = await spawn_child_nursery(nursery, shutdown_timeout=10)
 
     def shutdown():
         shutdown_trigger.set()

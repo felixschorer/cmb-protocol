@@ -16,7 +16,7 @@ async def start_connection(nursery, address, write_blocks, resource_id, reverse)
     sock = socket.socket(family=get_ip_family(address), type=socket.SOCK_DGRAM)
     cancel_scope = trio.CancelScope()
 
-    child_nursery, shutdown_trigger = await spawn_child_nursery(nursery)
+    child_nursery, shutdown_trigger = await spawn_child_nursery(nursery, shutdown_timeout=10)
 
     def shutdown():
         shutdown_trigger.set()
