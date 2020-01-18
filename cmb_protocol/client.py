@@ -12,8 +12,10 @@ from cmb_protocol.helpers import get_logger, set_listen_address, set_remote_addr
 logger = get_logger(__name__)
 
 
-async def run_receive_loop(connections, server_address, write_blocks, resource_id, reverse):
+async def run_receive_loop(connection_opened, connection_closed, write_blocks, server_address, resource_id, reverse):
     async with trio.open_nursery() as nursery:
+        child_nursery, shutdown_trigger = await spawn_child_nursery(nursery, shutdown_timeout=3)
+
         with socket.socket(family=get_ip_family(server_address), type=socket.SOCK_DGRAM) as udp_sock, \
                 trio.CancelScope() as cancel_scope:
 
@@ -21,10 +23,10 @@ async def run_receive_loop(connections, server_address, write_blocks, resource_i
             set_listen_address(udp_sock.getsockname())
             set_remote_address(server_address)
 
-            child_nursery, shutdown_trigger = await spawn_child_nursery(nursery, shutdown_timeout=3)
-
             def shutdown():
-                del connections[reverse]
+                # coordinate shutdown with higher order protocol instance
+                connection_closed()
+
                 shutdown_trigger.set()
                 cancel_scope.cancel()
                 logger.debug('Closed connection')
@@ -36,7 +38,8 @@ async def run_receive_loop(connections, server_address, write_blocks, resource_i
                 await udp_sock.send(packet_bytes)
 
             connection = ClientSideConnection(shutdown, spawn, send, write_blocks, resource_id, reverse)
-            connections[reverse] = connection
+            # coordinate startup with higher order protocol instance
+            connection_opened(connection)
 
             while True:
                 try:
@@ -54,22 +57,30 @@ async def run_receive_loop(connections, server_address, write_blocks, resource_i
 
 
 async def fetch(resource_id, server_addresses):
-    connections = dict()  # reverse -> connection
-
     _, resource_length = resource_id
     block_size = MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK
     blocks = [None] * calculate_number_of_blocks(resource_length, block_size)
 
-    async def write_blocks(offset, received_blocks, from_reverse):
-        # TODO: maybe need to reverse received blocks if reversed=True
-        blocks[offset:offset + len(received_blocks)] = received_blocks
-
-        if (not from_reverse) in connections:
-            await connections[not from_reverse].send_stop(offset if from_reverse else offset + len(received_blocks) - 1)
-
     async with trio.open_nursery() as nursery:
+        connections = dict()  # reverse -> connection
+
         for reverse, address in server_addresses.items():
-            nursery.start_soon(run_receive_loop, connections, address, write_blocks, resource_id, reverse)
+            def connection_opened(connection):
+                connections[reverse] = connection
+
+            def connection_closed():
+                del connections[reverse]
+
+            async def write_blocks(offset, received_blocks):
+                # TODO: maybe need to reverse received blocks if reversed=True
+                blocks[offset:offset + len(received_blocks)] = received_blocks
+
+                if (not reverse) in connections:
+                    await connections[not reverse].send_stop(
+                        offset if reverse else offset + len(received_blocks) - 1)
+
+            nursery.start_soon(run_receive_loop, connection_opened, connection_closed, write_blocks, address,
+                               resource_id, reverse)
 
     assert all([block is not None for block in blocks])
 
