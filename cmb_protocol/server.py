@@ -21,15 +21,17 @@ async def run_accept_loop(udp_sock, resource_id, encoders):
         while True:
             try:
                 data, address = await udp_sock.recvfrom(2048)
-                packet = PacketType.parse_packet(data)
                 log_util.set_remote_address(address)
-                logger.debug('Received %s', packet)
+
+                packet = PacketType.parse_packet(data)
             except (ConnectionResetError, ConnectionRefusedError):
                 # ignore error as we can't infer which send operation failed
                 pass
             except ValueError as exc:
                 logger.exception(exc)
             else:
+                logger.debug('Received %s', packet)
+
                 if address not in connections:
                     if not isinstance(packet, RequestResource):
                         continue

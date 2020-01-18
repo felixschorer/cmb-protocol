@@ -44,7 +44,6 @@ async def run_receive_loop(connection_opened, connection_closed, write_blocks, s
                 try:
                     data = await udp_sock.recv(2048)
                     packet = PacketType.parse_packet(data)
-                    logger.debug('Received %s', packet)
                 except (ConnectionResetError, ConnectionRefusedError):
                     # maybe handle this error
                     # however, it is not guaranteed that we will receive an error when sending into the void
@@ -52,6 +51,8 @@ async def run_receive_loop(connection_opened, connection_closed, write_blocks, s
                 except ValueError as exc:
                     logger.exception(exc)
                 else:
+                    logger.debug('Received %s', packet)
+
                     await connection.handle_packet(packet)
 
 
