@@ -1,10 +1,9 @@
 import struct
 import trio
 import hashlib
-
+from collections import OrderedDict
 from functools import partial
 from trio import socket
-
 from cmb_protocol.coding import Encoder
 from cmb_protocol.connection import ServerSideConnection
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK, RESOURCE_ID_STRUCT_FORMAT
@@ -74,9 +73,8 @@ async def serve(addresses, resource_id, encoders):
 def run(file_reader, addresses):
     m = hashlib.md5()
     resource_length = 0
-    encoders = []
+    encoders = OrderedDict()  # block_id -> encoder
 
-    # read file
     with file_reader:
         logger.debug('Reading from %s', file_reader.name)
 
@@ -84,15 +82,12 @@ def run(file_reader, addresses):
         block_size = MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK
         for block_id, block_content in enumerate(iter(partial(file_reader.read, block_size), b'')):
             m.update(block_content)
-            # create encoders for blocks
-            encoders.append(Encoder(block_id, block_content, MAXIMUM_TRANSMISSION_UNIT))
             resource_length += len(block_content)
+            encoders[block_id] = Encoder(block_content, MAXIMUM_TRANSMISSION_UNIT)
 
-    # hash file
     resource_hash = m.digest()
     resource_id = (resource_hash, resource_length)
     packed_resource_id = struct.pack(RESOURCE_ID_STRUCT_FORMAT, *resource_id).hex()
 
-    # print file hash concatenated with length
     logger.debug('Serving resource %s', packed_resource_id)
     trio.run(serve, addresses, resource_id, encoders)
