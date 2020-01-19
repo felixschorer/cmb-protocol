@@ -1,11 +1,11 @@
 import trio
 from abc import ABC
 
-from cmb_protocol.coding import Decoder
+from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK, calculate_number_of_blocks, \
     calculate_block_size
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
-    Error, ErrorCode
+    Error, ErrorCode, Packet, Feedback
 
 
 class Connection(ABC):
@@ -128,6 +128,59 @@ class ServerSideConnection(Connection):
         self.connected = False
         self.reverse = None
         self.stop_at_block_id = None
+        self.initial_timestamp = trio.current_time()
+
+        # TFRC parameters
+        self.SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + \
+                            Data.HEADER_SIZE + \
+                            RAPTORQ_HEADER_SIZE + \
+                            MAXIMUM_TRANSMISSION_UNIT  # s, in bytes
+        self.allowed_sending_rate = self.nominal_packet_size  # X, in bytes per second
+        self.time_last_doubled = 0  # tld, during slow-start, in seconds
+        self.no_feedback_timer_cancel_scope = None
+        self.initial_no_feedback_timer_cancel_scope_deadline = None
+        self.set_no_feedback_timer(2)
+        self.rtt = None  # R
+        self.received_initial_feedback = False
+
+    def set_no_feedback_timer(self, timeout):
+        deadline = trio.current_time() + timeout
+
+        async def init():
+            with trio.CancelScope(deadline=self.initial_no_feedback_timer_cancel_scope_deadline) as cancel_scope:
+                self.no_feedback_timer_cancel_scope = cancel_scope
+                await trio.sleep_forever()
+            self.no_feedback_timer_cancel_scope = None
+            self.initial_no_feedback_timer_cancel_scope_deadline = None
+            self.handle_no_feedback_timer_expired()
+
+        if self.no_feedback_timer_cancel_scope is None:
+            old_deadline = self.initial_no_feedback_timer_cancel_scope_deadline
+            self.initial_no_feedback_timer_cancel_scope_deadline = deadline
+            if old_deadline is None:
+                self.spawn(init)
+        else:
+            self.no_feedback_timer_cancel_scope.deadline = deadline
+
+    def handle_no_feedback_timer_expired(self):
+        pass
+
+    @property
+    def current_timestamp(self):
+        return int((trio.current_time() - self.initial_timestamp) * 1000) % (2 ** 24)
+
+    def update_rtt(self, packet_timestamp, packet_delay):
+        r_sample = (self.current_timestamp - packet_timestamp) % (2 ** 24) - packet_delay
+        q = 0.9
+        self.rtt = r_sample if self.rtt is None else q * self.rtt + (1 - q) * r_sample
+
+    async def handle_feedback(self, packet):
+        self.update_rtt(packet.timestamp, packet.delay)
+        if not self.received_initial_feedback:
+            self.received_initial_feedback = True
+            w_init = min(4 * self.SEGMENT_SIZE, max(2 * self.SEGMENT_SIZE, 4380))
+            self.allowed_sending_rate = w_init / self.rtt
+            self.time_last_doubled = trio.current_time()
 
     async def handle_request_resource(self, packet):
         if self.resource_id != packet.resource_id:
@@ -142,7 +195,6 @@ class ServerSideConnection(Connection):
             pass  # already connected and sending
 
     async def send_blocks(self):
-        initial_timestamp = trio.current_time()
         sequence_number = 0
         try:
             for block_id, encoder in reversed(self.encoders.items()) if self.reverse else self.encoders.items():
@@ -152,7 +204,7 @@ class ServerSideConnection(Connection):
                     if finished:
                         return
 
-                    timestamp = int((trio.current_time() - initial_timestamp) * 1000) % (2 ** 24)
+                    timestamp = self.current_timestamp
                     packet = Data(block_id=block_id,
                                   timestamp=timestamp,
                                   estimated_rtt=0,
@@ -189,3 +241,5 @@ class ServerSideConnection(Connection):
             await self.handle_nack_block(packet)
         elif isinstance(packet, AckOppositeRange):
             await self.handle_ack_opposite_range(packet)
+        elif isinstance(packet, Feedback):
+            await self.handle_feedback(packet)

@@ -101,7 +101,7 @@ class Data(Packet):
     _packet_type_ = 0xcb01
 
     __format = '!6s3sH3s'
-    __format_size = struct.calcsize(__format)
+    HEADER_SIZE = struct.calcsize(__format)
 
     def __init__(self, block_id, timestamp, estimated_rtt, sequence_number, fec_data):
         super().__init__()
@@ -120,7 +120,7 @@ class Data(Packet):
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        header, fec_data = packet_bytes[:cls.__format_size], packet_bytes[cls.__format_size:]
+        header, fec_data = packet_bytes[:cls.HEADER_SIZE], packet_bytes[cls.HEADER_SIZE:]
         block_id, timestamp, estimated_rtt, sequence_number = struct.unpack(cls.__format, header)
         return Data(block_id=unpack_uint48(block_id),
                     timestamp=unpack_uint24(timestamp),
