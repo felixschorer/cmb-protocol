@@ -28,9 +28,9 @@ class Connection(ABC):
         :param spawn:    function for spawning background tasks
         :param send:     async function for sending a packet to the remote peer
         """
-        self.shutdown = shutdown
-        self.spawn = spawn
-        self.send = send
+        self._shutdown = shutdown
+        self._spawn = spawn
+        self._send = send
 
     async def handle_packet(self, packet):
         """
@@ -41,6 +41,15 @@ class Connection(ABC):
         :param packet:  the received packet
         """
         self.shutdown()
+
+    def shutdown(self):
+        self._shutdown()
+
+    def spawn(self, async_func, *args, **kwargs):
+        self._spawn(async_func, *args, **kwargs)
+
+    async def send(self, packet):
+        await self._send(packet)
 
 
 class ClientSideConnection(Connection):
@@ -180,9 +189,9 @@ class ServerSideConnection(Connection):
         self.no_feedback_timer.add_listener(self.handle_no_feedback_timer_expired)
         self.no_feedback_timer.reset(2)  # in seconds
 
-    def close(self):
+    def shutdown(self):
         self.no_feedback_timer.clear_listeners()
-        self.shutdown()
+        super().shutdown()
 
     def handle_no_feedback_timer_expired(self):
         pass
@@ -241,7 +250,7 @@ class ServerSideConnection(Connection):
     async def handle_request_resource(self, packet):
         if self.resource_id != packet.resource_id:
             await self.send(Error(ErrorCode.RESOURCE_NOT_FOUND))
-            self.close()
+            self.shutdown()
         elif not self.connected:
             self.reverse = packet.flags is RequestResourceFlags.REVERSE
             self.connected = True
@@ -270,7 +279,7 @@ class ServerSideConnection(Connection):
                     await self.send(packet)
                     await trio.sleep(0.01)
         finally:
-            self.close()
+            self.shutdown()
 
     async def handle_ack_block(self, packet):
         pass
