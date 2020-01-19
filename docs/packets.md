@@ -50,7 +50,7 @@ Bounded exponential back-off is used to resend the packet in case it got dropped
 ```
 - Block ID: 48 bit identifier of the block this packet belongs to
 - Timestamp: 24 bit timestamp in milliseconds starting at 0
-- Estimated RTT: 16 bit estimated round trip time
+- Estimated RTT: 16 bit estimated round trip time in milliseconds
 - Sequence Number: 24 bit sequence number
 - FEC Data: Data of the resource encoded using forward error correction
 
@@ -120,5 +120,5 @@ Client sends feedback for measurement, according to TFRC
 ```
 - Delay: 16 bit for the amount of time elapsed between the receipt of the last data packet at the receiver and the generation of this feedback report
 - Timestamp: 24 bit timestamp in milliseconds of the last data packet received
-- Receive Rate: 32 bit denoted in packets per second as rate at which the receiver estimates that data was received in the previous round-trip time
+- Receive Rate: 32 bit denoted in bytes per second as rate at which the receiver estimates that data was received in the previous round-trip time
 - Loss Event Rate: 32 bit IEEE 754 float estimate of the loss event rate
