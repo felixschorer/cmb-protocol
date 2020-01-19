@@ -12,7 +12,10 @@ from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock
     Error, ErrorCode, Packet, Feedback
 
 # called s in TFRC, in bytes
+from cmb_protocol.trio_util import Timer
+
 SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + Data.HEADER_SIZE + RAPTORQ_HEADER_SIZE + MAXIMUM_TRANSMISSION_UNIT
+
 
 class Connection(ABC):
     """
@@ -167,33 +170,19 @@ class ServerSideConnection(Connection):
         self.allowed_sending_rate = SEGMENT_SIZE  # X, in bytes per second
         self.initial_allowed_sending_rate = None
         self.time_last_doubled = 0  # tld, during slow-start, in seconds
-        self.no_feedback_timer_cancel_scope = None
-        self.initial_no_feedback_timer_cancel_scope_deadline = None
-        self.set_no_feedback_timer(2)  # in seconds
         self.rtt = None  # R
         self.received_initial_feedback = False
         # list of tuples with timestamp in seconds and estimated receive rate at the receiver
         self.recv_set = ReceiveRateSet()
         self.loss_event_rate = 0
 
-    def set_no_feedback_timer(self, timeout):
-        deadline = trio.current_time() + timeout  # trio needs seconds
+        self.no_feedback_timer = Timer(self.spawn)
+        self.no_feedback_timer.add_listener(self.handle_no_feedback_timer_expired)
+        self.no_feedback_timer.reset(2)  # in seconds
 
-        async def init():
-            with trio.CancelScope(deadline=self.initial_no_feedback_timer_cancel_scope_deadline) as cancel_scope:
-                self.no_feedback_timer_cancel_scope = cancel_scope
-                await trio.sleep_forever()
-            self.no_feedback_timer_cancel_scope = None
-            self.initial_no_feedback_timer_cancel_scope_deadline = None
-            self.handle_no_feedback_timer_expired()
-
-        if self.no_feedback_timer_cancel_scope is None:
-            old_deadline = self.initial_no_feedback_timer_cancel_scope_deadline
-            self.initial_no_feedback_timer_cancel_scope_deadline = deadline
-            if old_deadline is None:
-                self.spawn(init)
-        else:
-            self.no_feedback_timer_cancel_scope.deadline = deadline
+    def close(self):
+        self.no_feedback_timer.clear_listeners()
+        self.shutdown()
 
     def handle_no_feedback_timer_expired(self):
         pass
@@ -252,7 +241,7 @@ class ServerSideConnection(Connection):
     async def handle_request_resource(self, packet):
         if self.resource_id != packet.resource_id:
             await self.send(Error(ErrorCode.RESOURCE_NOT_FOUND))
-            self.shutdown()
+            self.close()
         elif not self.connected:
             self.reverse = packet.flags is RequestResourceFlags.REVERSE
             self.connected = True
@@ -281,7 +270,7 @@ class ServerSideConnection(Connection):
                     await self.send(packet)
                     await trio.sleep(0.01)
         finally:
-            self.shutdown()
+            self.close()
 
     async def handle_ack_block(self, packet):
         pass

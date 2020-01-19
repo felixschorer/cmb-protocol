@@ -1,12 +1,11 @@
 import hashlib
-
 import trio
 from trio import socket
-
 from cmb_protocol.connection import ClientSideConnection
-from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK, calculate_number_of_blocks
+from cmb_protocol.constants import calculate_number_of_blocks
 from cmb_protocol.packets import PacketType
-from cmb_protocol.helpers import get_ip_family, spawn_child_nursery, once
+from cmb_protocol.helpers import once
+from cmb_protocol.trio_util import spawn_child_nursery, get_ip_family
 from cmb_protocol import log_util
 
 logger = log_util.get_logger(__name__)
@@ -14,7 +13,7 @@ logger = log_util.get_logger(__name__)
 
 async def run_receive_loop(connection_opened, connection_closed, write_blocks, server_address, resource_id, reverse):
     async with trio.open_nursery() as nursery:
-        child_nursery, shutdown_trigger = await spawn_child_nursery(nursery, shutdown_timeout=3)
+        child_nursery, shutdown_trigger = await spawn_child_nursery(nursery.start_soon, shutdown_timeout=3)
 
         with trio.CancelScope() as cancel_scope, \
                 socket.socket(family=get_ip_family(server_address), type=socket.SOCK_DGRAM) as udp_sock:
