@@ -1,3 +1,6 @@
+import math
+from collections import namedtuple
+
 import trio
 from abc import ABC
 
@@ -7,6 +10,8 @@ from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK,
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
     Error, ErrorCode, Packet, Feedback
 
+# called s in TFRC, in bytes
+SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + Data.HEADER_SIZE + RAPTORQ_HEADER_SIZE + MAXIMUM_TRANSMISSION_UNIT
 
 class Connection(ABC):
     """
@@ -113,11 +118,10 @@ class ClientSideConnection(Connection):
             await self.send(AckOppositeRange(stop_at_block_id=stop_at_block_id))
 
 
+RecvSetEntry = namedtuple('RecvSetEntry', ['timestamp', 'value'])
+
+
 class ServerSideConnection(Connection):
-
-    # s, in bytes
-    SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + Data.HEADER_SIZE + RAPTORQ_HEADER_SIZE + MAXIMUM_TRANSMISSION_UNIT
-
     def __init__(self, shutdown, spawn, send, resource_id, encoders):
         """
         :param shutdown:     cf. Connection
@@ -135,16 +139,19 @@ class ServerSideConnection(Connection):
         self.initial_timestamp = trio.current_time()
 
         # TFRC parameters
-        self.allowed_sending_rate = self.SEGMENT_SIZE  # X, in bytes per second
+        self.allowed_sending_rate = SEGMENT_SIZE  # X, in bytes per second
         self.time_last_doubled = 0  # tld, during slow-start, in seconds
         self.no_feedback_timer_cancel_scope = None
         self.initial_no_feedback_timer_cancel_scope_deadline = None
-        self.set_no_feedback_timer(2)
+        self.set_no_feedback_timer(2000)  # in milliseconds
         self.rtt = None  # R
         self.received_initial_feedback = False
+        # list of tuples with timestamp and estimated receive rate at the receiver
+        self.recv_set = [RecvSetEntry(timestamp=0, value=math.inf)]
+        self.loss_event_rate = 0
 
     def set_no_feedback_timer(self, timeout):
-        deadline = trio.current_time() + timeout
+        deadline = trio.current_time() + timeout / 1000  # trio needs seconds
 
         async def init():
             with trio.CancelScope(deadline=self.initial_no_feedback_timer_cancel_scope_deadline) as cancel_scope:
@@ -169,18 +176,55 @@ class ServerSideConnection(Connection):
     def current_timestamp(self):
         return int((trio.current_time() - self.initial_timestamp) * 1000) % (2 ** 24)
 
-    def update_rtt(self, packet_timestamp, packet_delay):
-        r_sample = (self.current_timestamp - packet_timestamp) % (2 ** 24) - packet_delay
+    def update_rtt(self, timestamp, delay):
+        r_sample = (self.current_timestamp - timestamp) % (2 ** 24) - delay
         q = 0.9
         self.rtt = r_sample if self.rtt is None else q * self.rtt + (1 - q) * r_sample
 
+    def halve_recv_set(self):
+        self.recv_set = [(timestamp, recv / 2) for timestamp, recv in self.recv_set]
+
+    def maximize_recv_set(self, receive_rate):
+        self.recv_set.append(RecvSetEntry(timestamp=self.current_timestamp, value=receive_rate))
+        # delete initial value Infinity from X_recv_set, if it is still a member
+        if self.recv_set[0].value == math.inf:
+            del self.recv_set[0]
+
+        self.recv_set = [RecvSetEntry(timestamp=self.current_timestamp, value=self.max_recv_value)]
+
+    @property
+    def max_recv_value(self):
+        return max(value for _, value in self.recv_set)
+
+    def update_recv_set(self, receive_rate):
+        ts = self.current_timestamp
+        self.recv_set.append(RecvSetEntry(timestamp=ts, value=receive_rate))
+        # delete from X_recv_set values older than two round-trip times
+        self.recv_set = [recv for recv in self.recv_set if (ts - recv.timestamp) % (2 ** 24) < 2 * self.rtt]
+
     async def handle_feedback(self, packet):
-        self.update_rtt(packet.timestamp, packet.delay)
+        delay, timestamp, receive_rate, loss_event_rate = packet.delay, packet.timestamp, packet.receive_rate, \
+                                                          packet.loss_event_rate
+        self.update_rtt(timestamp, delay)
+        previous_loss_event_rate, self.loss_event_rate = self.loss_event_rate, loss_event_rate
+        rto = max(4 * self.rtt, 2 * SEGMENT_SIZE / self.allowed_sending_rate)
+
         if not self.received_initial_feedback:
             self.received_initial_feedback = True
-            w_init = min(4 * self.SEGMENT_SIZE, max(2 * self.SEGMENT_SIZE, 4380))
+            w_init = min(4 * SEGMENT_SIZE, max(2 * SEGMENT_SIZE, 4380))
             self.allowed_sending_rate = w_init / self.rtt
             self.time_last_doubled = trio.current_time()
+        else:
+            t_mbi = 64 * 1000  # maximum backoff interval in milliseconds
+            recv_limit = None
+            if True:  # TODO: calculate condition
+                if previous_loss_event_rate < loss_event_rate:  # TODO: regard NACKs as well
+                    self.halve_recv_set()
+                    receive_rate *= 0.85
+                    self.maximize_recv_set(receive_rate)
+                    recv_limit = self.max_recv_value
+            else:
+                pass  # TODO: continue
 
     async def handle_request_resource(self, packet):
         if self.resource_id != packet.resource_id:
