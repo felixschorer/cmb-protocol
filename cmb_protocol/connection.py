@@ -142,6 +142,8 @@ class ServerSideConnection(Connection):
             pass  # already connected and sending
 
     async def send_blocks(self):
+        initial_timestamp = trio.current_time()
+        sequence_number = 0
         try:
             for block_id, encoder in reversed(self.encoders.items()) if self.reverse else self.encoders.items():
                 for fec_data in encoder.source_packets:
@@ -150,7 +152,14 @@ class ServerSideConnection(Connection):
                     if finished:
                         return
 
-                    await self.send(Data(block_id=block_id, timestamp=0, fec_data=fec_data))
+                    timestamp = int((trio.current_time() - initial_timestamp) * 1000) % (2 ** 24)
+                    packet = Data(block_id=block_id,
+                                  timestamp=timestamp,
+                                  estimated_rtt=0,
+                                  sequence_number=sequence_number,
+                                  fec_data=fec_data)
+                    sequence_number = (sequence_number + 1) % (2 ** 24)
+                    await self.send(packet)
                     await trio.sleep(0.01)
         finally:
             self.shutdown()
