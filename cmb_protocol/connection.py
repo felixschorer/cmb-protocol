@@ -114,6 +114,10 @@ class ClientSideConnection(Connection):
 
 
 class ServerSideConnection(Connection):
+
+    # s, in bytes
+    SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + Data.HEADER_SIZE + RAPTORQ_HEADER_SIZE + MAXIMUM_TRANSMISSION_UNIT
+
     def __init__(self, shutdown, spawn, send, resource_id, encoders):
         """
         :param shutdown:     cf. Connection
@@ -131,11 +135,7 @@ class ServerSideConnection(Connection):
         self.initial_timestamp = trio.current_time()
 
         # TFRC parameters
-        self.SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + \
-                            Data.HEADER_SIZE + \
-                            RAPTORQ_HEADER_SIZE + \
-                            MAXIMUM_TRANSMISSION_UNIT  # s, in bytes
-        self.allowed_sending_rate = self.nominal_packet_size  # X, in bytes per second
+        self.allowed_sending_rate = self.SEGMENT_SIZE  # X, in bytes per second
         self.time_last_doubled = 0  # tld, during slow-start, in seconds
         self.no_feedback_timer_cancel_scope = None
         self.initial_no_feedback_timer_cancel_scope_deadline = None
