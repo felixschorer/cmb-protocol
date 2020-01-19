@@ -7,6 +7,7 @@ from abc import ABC
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK, calculate_number_of_blocks, \
     calculate_block_size
+from cmb_protocol.helpers import calculate_time_elapsed
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
     Error, ErrorCode, Packet, Feedback
 
@@ -118,7 +119,31 @@ class ClientSideConnection(Connection):
             await self.send(AckOppositeRange(stop_at_block_id=stop_at_block_id))
 
 
-RecvSetEntry = namedtuple('RecvSetEntry', ['timestamp', 'value'])
+class ReceiveRateSet:
+    Entry = namedtuple('RecvSetEntry', ['timestamp', 'value'])
+
+    def __init__(self):
+        self.entries = [self.Entry(timestamp=0, value=math.inf)]
+
+    def halve(self):
+        self.entries = [(timestamp, recv / 2) for timestamp, recv in self.entries]
+
+    def maximize(self, receive_rate, timestamp):
+        self.entries.append(self.Entry(timestamp=timestamp, value=receive_rate))
+        # delete initial value Infinity from X_recv_set, if it is still a member
+        if self.entries[0].value == math.inf:
+            del self.entries[0]
+        # set the timestamp of the largest item to the current time, delete all other items
+        self.entries = [self.Entry(timestamp=timestamp, value=self.max_value)]
+
+    @property
+    def max_value(self):
+        return max(value for _, value in self.entries)
+
+    def update(self, receive_rate, timestamp, rtt):
+        self.entries.append(self.Entry(timestamp=timestamp, value=receive_rate))
+        # delete from X_recv_set values older than two round-trip times
+        self.entries = [recv for recv in self.entries if calculate_time_elapsed(recv.timestamp, timestamp) < 2 * rtt]
 
 
 class ServerSideConnection(Connection):
@@ -148,7 +173,7 @@ class ServerSideConnection(Connection):
         self.rtt = None  # R
         self.received_initial_feedback = False
         # list of tuples with timestamp in seconds and estimated receive rate at the receiver
-        self.recv_set = [RecvSetEntry(timestamp=0, value=math.inf)]
+        self.recv_set = ReceiveRateSet()
         self.loss_event_rate = 0
 
     def set_no_feedback_timer(self, timeout):
@@ -175,37 +200,12 @@ class ServerSideConnection(Connection):
 
     @property
     def current_timestamp(self):  # in seconds
-        return self.calculate_time_elapsed(self.initial_timestamp, trio.current_time())
+        return calculate_time_elapsed(self.initial_timestamp, trio.current_time())
 
     def update_rtt(self, timestamp, delay):  # timestamp in seconds, delay in seconds
-        r_sample = self.calculate_time_elapsed(timestamp, self.current_timestamp) - delay
+        r_sample = calculate_time_elapsed(timestamp, self.current_timestamp) - delay
         q = 0.9
         self.rtt = r_sample if self.rtt is None else q * self.rtt + (1 - q) * r_sample
-
-    def halve_recv_set(self):
-        self.recv_set = [(timestamp, recv / 2) for timestamp, recv in self.recv_set]
-
-    def maximize_recv_set(self, receive_rate):
-        self.recv_set.append(RecvSetEntry(timestamp=self.current_timestamp, value=receive_rate))
-        # delete initial value Infinity from X_recv_set, if it is still a member
-        if self.recv_set[0].value == math.inf:
-            del self.recv_set[0]
-        # set the timestamp of the largest item to the current time, delete all other items
-        self.recv_set = [RecvSetEntry(timestamp=self.current_timestamp, value=self.max_recv_value)]
-
-    @property
-    def max_recv_value(self):
-        return max(value for _, value in self.recv_set)
-
-    @staticmethod
-    def calculate_time_elapsed(start, end):  # in seconds
-        return (int((end - start) * 1000) % (2 ** 24)) / 1000
-
-    def update_recv_set(self, receive_rate):
-        ts = self.current_timestamp
-        self.recv_set.append(RecvSetEntry(timestamp=ts, value=receive_rate))
-        # delete from X_recv_set values older than two round-trip times
-        self.recv_set = [recv for recv in self.recv_set if self.calculate_time_elapsed(recv.timestamp, ts) < 2 * self.rtt]
 
     async def handle_feedback(self, packet):
         # RFC 5348 Section 4.3
@@ -227,16 +227,16 @@ class ServerSideConnection(Connection):
             recv_limit = None
             if False:  # TODO: calculate condition
                 if previous_loss_event_rate < loss_event_rate:  # TODO: regard NACKs as well
-                    self.halve_recv_set()
+                    self.recv_set.halve()
                     receive_rate *= 0.85
-                    self.maximize_recv_set(receive_rate)
-                    recv_limit = self.max_recv_value
+                    self.recv_set.maximize(receive_rate, self.current_timestamp)
+                    recv_limit = self.recv_set.max_value
                 else:
-                    self.maximize_recv_set(receive_rate)
-                    recv_limit = 2 * self.max_recv_value
+                    self.recv_set.maximize(receive_rate, self.current_timestamp)
+                    recv_limit = self.recv_set.max_value
             else:
-                self.update_recv_set(receive_rate)
-                recv_limit = 2 * self.max_recv_value
+                self.recv_set.update(receive_rate, self.current_timestamp, self.rtt)
+                recv_limit = 2 * self.recv_set.max_value
 
             if loss_event_rate > 0:
                 bps = SEGMENT_SIZE / self.rtt * math.sqrt(2 * loss_event_rate / 3) + (rto * (3 * math.sqrt(3 * loss_event_rate / 8) * loss_event_rate * (1 + 32 * loss_event_rate ** 2)))
