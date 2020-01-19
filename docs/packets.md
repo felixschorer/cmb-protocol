@@ -59,7 +59,7 @@ Acknowledges the receipt of a block.
 ```
      0                              15 16                             32
     ┌─────────────────────────────────┬─────────────────────────────────┐
-  0 |              0xcb03             |                                 |
+  0 |              0xcb02             |                                 |
     ├─────────────────────────────────┘                                 |
   4 |                             Block ID                              |
     └───────────────────────────────────────────────────────────────────┘
@@ -71,7 +71,7 @@ Packet to notify the sender to send repair packets of the given block.
 ```
      0                              15 16                             32
     ┌─────────────────────────────────┬─────────────────────────────────┐
-  0 |              0xcb05             |                                 |
+  0 |              0xcb03             |                                 |
     ├─────────────────────────────────┘                                 |
   4 |                             Block ID                              |
     ├─────────────────────────────────┬─────────────────────────────────┘
@@ -87,32 +87,38 @@ Acknowledges the receipt of a block range from the given block to the end of the
 ```
      0                              15 16                             32
     ┌─────────────────────────────────┬─────────────────────────────────┐
-  0 |              0xcb06             |                                 |
+  0 |              0xcb04             |                                 |
     ├─────────────────────────────────┘                                 |
   4 |                         Stop at Block ID                          |
     └───────────────────────────────────────────────────────────────────┘
 ```
 - Stop at Block ID: 48 bit identifier of the block who marks the start of the acknowledged range
 
-## TFRC Feedback
-Client sends feedback for measurement
-```
-     0                              15 16                             32
-    ┌─────────────────────────────────┬─────────────────────────────────┐
-  0 |              0xcb06             |             Delay               |
-    ├─────────────────────────────────┴─────────────────────────────────|
-  4 |                         ...                          |
-    └───────────────────────────────────────────────────────────────────┘
-```
-- Delay: 16 bit for the amount of time elapsed between the receipt of the last data packet at the receiver and the generation of this feedback report
-
-
 ## Error
 Generic error packet that can be identified by its Error Code
 ```
      0                              15 16                             32
     ┌─────────────────────────────────┬─────────────────────────────────┐
-  0 |              0xcb07             |           Error Code            |
+  0 |              0xcb05             |           Error Code            |
     └─────────────────────────────────┴─────────────────────────────────┘
 ```
 - Error Code: 16 bit error code
+
+## Feedback
+Client sends feedback for measurement, according to TFRC
+```
+     0                              15 16                             32
+    ┌─────────────────────────────────┬─────────────────────────────────┐
+  0 |              0xcb06             |             Delay               |
+    ├─────────────────────────────────┴────────────────┬────────────────┤
+  4 |                     Timestamp                    |    Reserved    |
+    ├──────────────────────────────────────────────────┴────────────────┤
+  8 |                            Receive Rate                           |
+    ├───────────────────────────────────────────────────────────────────┤
+ 12 |                          Loss Event Rate                          |
+    └───────────────────────────────────────────────────────────────────┘
+```
+- Delay: 16 bit for the amount of time elapsed between the receipt of the last data packet at the receiver and the generation of this feedback report
+- Timestamp: 24 bit timestamp in milliseconds of the last data packet received
+- Receive Rate: 32 bit denoted in packets per second as rate at which the receiver estimates that data was received in the previous round-trip time
+- Loss Event Rate: 32 bit IEEE 754 float estimate of the loss event rate

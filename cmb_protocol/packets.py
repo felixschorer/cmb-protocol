@@ -130,9 +130,9 @@ class Data(Packet):
 
 
 class AckBlock(Packet):
-    __slots__ = 'block_id'
+    __slots__ = 'block_id',
 
-    _packet_type_ = 0xcb03
+    _packet_type_ = 0xcb02
 
     __format = '!6s'
 
@@ -152,7 +152,7 @@ class AckBlock(Packet):
 class NackBlock(Packet):
     __slots__ = 'block_id', 'received_packets'
 
-    _packet_type_ = 0xcb05
+    _packet_type_ = 0xcb03
 
     __format = '!6sH'
 
@@ -173,7 +173,7 @@ class NackBlock(Packet):
 class AckOppositeRange(Packet):
     __slots__ = 'stop_at_block_id',
 
-    _packet_type_ = 0xcb06
+    _packet_type_ = 0xcb04
 
     __format = '!6s'
 
@@ -196,9 +196,9 @@ class ErrorCode(IntEnum):
 
 
 class Error(Packet):
-    __slots__ = 'error_code'
+    __slots__ = 'error_code',
 
-    _packet_type_ = 0xcb07
+    _packet_type_ = 0xcb05
 
     __format = '!H'
 
@@ -216,6 +216,37 @@ class Error(Packet):
         return Error(error_code=ErrorCode(error_code))
 
 
+class Feedback(Packet):
+    __slots__ = 'delay', 'timestamp', 'receive_rate', 'loss_event_rate'
+
+    _packet_type_ = 0xcb06
+
+    __format = '!H3s1sIf'
+
+    def __init__(self, delay, timestamp, receive_rate, loss_event_rate):
+        super().__init__()
+        self.delay = delay
+        self.timestamp = timestamp
+        self.receive_rate = receive_rate
+        self.loss_event_rate = loss_event_rate
+
+    def _serialize_fields(self):
+        values = self.delay, \
+                 pack_uint24(self.timestamp), \
+                 bytes(1), \
+                 self.receive_rate, \
+                 self.loss_event_rate
+        return struct.pack(self.__format, *values)
+
+    @classmethod
+    def _parse_fields(cls, packet_bytes):
+        delay, timestamp, reserved, receive_rate, loss_event_rate = struct.unpack(cls.__format, packet_bytes)
+        return Feedback(delay=delay,
+                        timestamp=unpack_uint24(timestamp),
+                        receive_rate=receive_rate,
+                        loss_event_rate=loss_event_rate)
+
+
 @unique
 class PacketType(Enum):
     """
@@ -228,6 +259,7 @@ class PacketType(Enum):
     NACK_BLOCK = NackBlock
     ACK_OPPOSITE_RANGE = AckOppositeRange
     ERROR = Error
+    FEEDBACK = Feedback
 
     def __new__(cls, packet_cls):
         assert issubclass(packet_cls, Packet)
