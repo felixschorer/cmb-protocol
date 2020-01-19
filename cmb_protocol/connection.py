@@ -14,6 +14,7 @@ from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock
 # called s in TFRC, in bytes
 SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + Data.HEADER_SIZE + RAPTORQ_HEADER_SIZE + MAXIMUM_TRANSMISSION_UNIT
 
+
 class Connection(ABC):
     """
     Abstract connection which immediately shuts down after receiving a packet
