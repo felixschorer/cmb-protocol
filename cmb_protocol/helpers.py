@@ -54,6 +54,17 @@ def unpack_uint48(buffer):
     return uint48
 
 
+def pack_uint24(uint24):
+    assert uint24 < 2**24
+    return struct.pack('!I', uint24)[-3:]
+
+
+def unpack_uint24(buffer):
+    assert len(buffer) == 3
+    uint24, = struct.unpack('!I', bytes(1) + buffer)
+    return uint24
+
+
 def once(func):
     has_been_called = False
 

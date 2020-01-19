@@ -2,7 +2,7 @@ import struct
 from abc import ABCMeta, ABC, abstractmethod
 from enum import unique, Enum, IntFlag, IntEnum
 
-from cmb_protocol.helpers import unpack_uint48, pack_uint48
+from cmb_protocol.helpers import unpack_uint48, pack_uint48, pack_uint24, unpack_uint24
 
 
 class _PacketMeta(ABCMeta):
@@ -96,27 +96,37 @@ class RequestResource(Packet):
 
 
 class Data(Packet):
-    __slots__ = 'block_id', 'timestamp', 'fec_data'
+    __slots__ = 'block_id', 'timestamp', 'estimated_rtt', 'sequence_number', 'fec_data'
 
     _packet_type_ = 0xcb01
 
-    __format = '!6sI'
+    __format = '!6s3sH3s'
     __format_size = struct.calcsize(__format)
 
-    def __init__(self, block_id, timestamp, fec_data):
+    def __init__(self, block_id, timestamp, estimated_rtt, sequence_number, fec_data):
         super().__init__()
         self.block_id = block_id
         self.fec_data = fec_data
         self.timestamp = timestamp
+        self.estimated_rtt = estimated_rtt
+        self.sequence_number = sequence_number
 
     def _serialize_fields(self):
-        return struct.pack(self.__format, pack_uint48(self.block_id), self.timestamp) + self.fec_data
+        values = pack_uint48(self.block_id), \
+                 pack_uint24(self.timestamp), \
+                 self.estimated_rtt, \
+                 pack_uint24(self.sequence_number)
+        return struct.pack(self.__format, *values) + self.fec_data
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        block_id, timestamp = struct.unpack(cls.__format, packet_bytes[:cls.__format_size])
-        fec_data = packet_bytes[cls.__format_size:]
-        return Data(block_id=unpack_uint48(block_id), timestamp=timestamp, fec_data=fec_data)
+        header, fec_data = packet_bytes[:cls.__format_size], packet_bytes[cls.__format_size:]
+        block_id, timestamp, estimated_rtt, sequence_number = struct.unpack(cls.__format, header)
+        return Data(block_id=unpack_uint48(block_id),
+                    timestamp=unpack_uint24(timestamp),
+                    estimated_rtt=estimated_rtt,
+                    sequence_number=unpack_uint24(sequence_number),
+                    fec_data=fec_data)
 
 
 class AckBlock(Packet):

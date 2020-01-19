@@ -38,16 +38,20 @@ Bounded exponential back-off is used to resend the packet in case it got dropped
   0 |              0xcb01             |                                 |
     ├─────────────────────────────────┘                                 |
   4 |                             Block ID                              |
-    ├───────────────────────────────────────────────────────────────────┤
-  8 |                            Timestamp                              |
-    ├───────────────────────────────────────────────────────────────────┤
- 12 |                                                                   |
+    ├──────────────────────────────────────────────────┬────────────────┤
+  8 |                     Timestamp                    | Estimated RTT  |
+    ├────────────────┬─────────────────────────────────┴────────────────┤
+ 12 | Estimated RTT  |                  Sequence Number                 |
+    ├────────────────┴──────────────────────────────────────────────────┤
+ 14 |                                                                   |
     ├ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ FEC Data  ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ┤
   X |                                                                   | 
     └───────────────────────────────────────────────────────────────────┘
 ```
 - Block ID: 48 bit identifier of the block this packet belongs to
-- Timestamp: 32 bit timestamp in milliseconds starting at 0
+- Timestamp: 24 bit timestamp in milliseconds starting at 0
+- Estimated RTT: 16 bit estimated round trip time
+- Sequence Number: 24 bit sequence number
 - FEC Data: Data of the resource encoded using forward error correction
 
 ## Ack Block
@@ -89,6 +93,19 @@ Acknowledges the receipt of a block range from the given block to the end of the
     └───────────────────────────────────────────────────────────────────┘
 ```
 - Stop at Block ID: 48 bit identifier of the block who marks the start of the acknowledged range
+
+## TFRC Feedback
+Client sends feedback for measurement
+```
+     0                              15 16                             32
+    ┌─────────────────────────────────┬─────────────────────────────────┐
+  0 |              0xcb06             |             Delay               |
+    ├─────────────────────────────────┴─────────────────────────────────|
+  4 |                         ...                          |
+    └───────────────────────────────────────────────────────────────────┘
+```
+- Delay: 16 bit for the amount of time elapsed between the receipt of the last data packet at the receiver and the generation of this feedback report
+
 
 ## Error
 Generic error packet that can be identified by its Error Code
