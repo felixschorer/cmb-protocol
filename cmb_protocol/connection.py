@@ -134,27 +134,32 @@ class ReceiveRateSet:
     Entry = namedtuple('RecvSetEntry', ['timestamp', 'value'])
 
     def __init__(self):
-        self.entries = [self.Entry(timestamp=0, value=math.inf)]
+        self._entries = [self.Entry(timestamp=0, value=math.inf)]
 
     def halve(self):
-        self.entries = [(timestamp, recv / 2) for timestamp, recv in self.entries]
+        self._entries = [(timestamp, recv / 2) for timestamp, recv in self._entries]
 
     def maximize(self, receive_rate, timestamp):
         self._append(self.Entry(timestamp=timestamp, value=receive_rate))
         # delete initial value Infinity if it is still a member
-        if self.entries[0].value == math.inf:
-            del self.entries[0]
+        if self._entries[0].value == math.inf:
+            del self._entries[0]
         # set the timestamp of the largest item to the current time, delete all other items
-        self.entries = [self.Entry(timestamp=timestamp, value=self.max_value)]
+        self._entries = [self.Entry(timestamp=timestamp, value=self.max_value)]
 
     @property
     def max_value(self):
-        return max(value for _, value in self.entries)
+        return max(value for _, value in self._entries)
 
     def update(self, receive_rate, timestamp, rtt):
-        self.entries.append(self.Entry(timestamp=timestamp, value=receive_rate))
-        # delete values older than two round-trip times and only keep 3 most recent
-        self.entries = [recv for recv in self.entries[-3:] if calculate_time_elapsed(recv.timestamp, timestamp) < 2 * rtt]
+        self._append(self.Entry(timestamp=timestamp, value=receive_rate))
+        # delete values older than two round-trip times
+        self._entries = [recv for recv in self._entries if calculate_time_elapsed(recv.timestamp, timestamp) < 2 * rtt]
+
+    def _append(self, entry):
+        self._entries.append(entry)
+        if len(self._entries) > 3:
+            del self._entries[:-3]
 
 
 class ServerSideConnection(Connection):
