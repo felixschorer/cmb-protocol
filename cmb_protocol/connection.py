@@ -189,10 +189,14 @@ class ServerSideConnection(Connection):
         self.initial_allowed_sending_rate = None
         self.time_last_doubled = 0  # tld, during slow-start, in seconds
         self.rtt = None  # R
+        self.rto = None
         # list of tuples with timestamp in seconds and estimated receive rate at the receiver
         self.recv_set = ReceiveRateSet()
         self.loss_event_rate = 0  # p
         self.tcp_sending_rate = None  # X_bps
+        # data-limited interval
+        self.not_limited1 = self.not_limited2 = self.t_new = self.t_next = 0
+        self.data_limited = False
 
         self.no_feedback_timer = Timer(self.spawn)
         self.no_feedback_timer.add_listener(self.handle_no_feedback_timer_expired)
@@ -232,10 +236,9 @@ class ServerSideConnection(Connection):
 
     def update_allowed_sending_rate(self, receive_rate, previous_loss_event_rate=None):
         # RFC 5348 Section 4.3
-        recv_limit = None
         if previous_loss_event_rate is None:
             previous_loss_event_rate = self.loss_event_rate
-        if False:  # TODO: calculate condition
+        if self.data_limited:
             if previous_loss_event_rate < self.loss_event_rate:  # TODO: regard NACKs as well
                 self.recv_set.halve()
                 receive_rate *= 0.85
@@ -248,12 +251,12 @@ class ServerSideConnection(Connection):
             self.recv_set.update(receive_rate, self.current_timestamp, self.rtt)
             recv_limit = 2 * self.recv_set.max_receive_rate
 
-        if loss_event_rate > 0:
-            self.tcp_sending_rate = SEGMENT_SIZE / (self.rtt * math.sqrt(2 * loss_event_rate / 3) + (rto * (
-                        3 * math.sqrt(3 * loss_event_rate / 8) * loss_event_rate * (1 + 32 * loss_event_rate ** 2))))
+        if self.loss_event_rate > 0:
+            self.tcp_sending_rate = SEGMENT_SIZE / (self.rtt * math.sqrt(2 * self.loss_event_rate / 3) + (self.rto * (
+                        3 * math.sqrt(3 * self.loss_event_rate / 8) * self.loss_event_rate * (1 + 32 * self.loss_event_rate ** 2))))
             self.allowed_sending_rate = max(min(self.tcp_sending_rate, recv_limit),
                                             SEGMENT_SIZE / self.MAXIMUM_BACKOFF_INTERVAL)
-        elif self.current_timestamp - self.time_last_doubled >= self.rtt:
+        elif calculate_time_elapsed(self.time_last_doubled, self.current_timestamp) >= self.rtt:
             self.allowed_sending_rate = max(min(2 * self.allowed_sending_rate, recv_limit),
                                             self.initial_allowed_sending_rate)
             self.time_last_doubled = self.current_timestamp
@@ -265,7 +268,7 @@ class ServerSideConnection(Connection):
         previous_rtt = self.rtt
         self.update_rtt(timestamp, delay)
         previous_loss_event_rate, self.loss_event_rate = self.loss_event_rate, loss_event_rate
-        rto = max(4 * self.rtt, 2 * SEGMENT_SIZE / self.allowed_sending_rate)
+        self.rto = max(4 * self.rtt, 2 * SEGMENT_SIZE / self.allowed_sending_rate)
 
         if previous_rtt is None:
             # RFC 5348 Section 4.2
@@ -277,7 +280,16 @@ class ServerSideConnection(Connection):
 
         # TODO: for oscillation: cf. RFC 5348 Section 4.5
 
-        self.no_feedback_timer.reset(rto)
+        self.no_feedback_timer.reset(self.rto)
+
+        # RFC 5348 Section 8.2.1
+        self.t_new = timestamp
+        t_old = calculate_time_elapsed(self.rtt, self.t_new)
+        self.t_next = self.current_timestamp
+        self.data_limited = not (t_old < self.not_limited1 <= self.t_new or t_old < self.not_limited2 <= self.t_new)
+
+        if self.not_limited1 <= self.t_new < self.not_limited2:
+            self.not_limited1 = self.not_limited2
 
     async def handle_request_resource(self, packet):
         if self.resource_id != packet.resource_id:
@@ -312,12 +324,12 @@ class ServerSideConnection(Connection):
 
         packet_iter = packets()
 
-        # RFC 5348 Section 4.6 and 8.3
-        t = self.current_timestamp  # set t_0
+        # RFC 5348 Section 4.6, 8.2, and 8.3
+        t = trio.current_time()  # set t_0
         while True:
             t_inter_packet_interval = SEGMENT_SIZE / self.allowed_sending_rate
             t_delta = min(t_inter_packet_interval, self.SCHEDULING_GRANULARITY, self.rtt if self.rtt is not None else math.inf) / 2
-            if self.current_timestamp > t - t_delta:
+            if trio.current_time() > t - t_delta:
                 try:
                     packet = next(packet_iter)
                     await self.send(packet)
@@ -326,6 +338,14 @@ class ServerSideConnection(Connection):
                     self.shutdown()
                     return
             else:
+                # sender is not data-limited at this instant
+                if self.not_limited1 <= self.t_new:
+                    # goal: self.not_limited1 > self.t_new
+                    self.not_limited1 = self.t_new
+                elif self.not_limited2 <= self.t_next:
+                    # goal: self.not_limited2 > self.t_next
+                    self.not_limited2 = self.current_timestamp
+
                 await trio.sleep(self.SCHEDULING_GRANULARITY)
 
     async def handle_ack_block(self, packet):
