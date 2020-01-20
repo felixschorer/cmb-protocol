@@ -17,7 +17,7 @@ class Timer:
         self._cancel_scope = None
         self._deadline = None
 
-    def reset(self, timeout):
+    def reset(self, timeout):  # timeout in seconds
         self._stop_waiter()
         self._deadline = trio.current_time() + timeout
         self._start_waiter()

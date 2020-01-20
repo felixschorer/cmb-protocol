@@ -10,9 +10,10 @@ from cmb_protocol.helpers import calculate_time_elapsed
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
     Error, ErrorCode, Packet, Feedback
 
-# called s in TFRC, in bytes
 from cmb_protocol.trio_util import Timer
 
+
+# called s in TFRC, in bytes
 SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + Data.HEADER_SIZE + RAPTORQ_HEADER_SIZE + MAXIMUM_TRANSMISSION_UNIT
 
 
@@ -131,29 +132,29 @@ class ClientSideConnection(Connection):
 
 
 class ReceiveRateSet:
-    Entry = namedtuple('RecvSetEntry', ['timestamp', 'value'])
+    Entry = namedtuple('RecvSetEntry', ['timestamp', 'receive_rate'])
 
-    def __init__(self):
-        self._entries = [self.Entry(timestamp=0, value=math.inf)]
+    def __init__(self, receive_rate=math.inf, timestamp=0):
+        self._entries = [self.Entry(timestamp=timestamp, receive_rate=receive_rate)]
 
     def halve(self):
         self._entries = [(timestamp, recv / 2) for timestamp, recv in self._entries]
 
     def maximize(self, receive_rate, timestamp):
-        self._append(self.Entry(timestamp=timestamp, value=receive_rate))
-        # delete initial value Infinity if it is still a member
-        if self._entries[0].value == math.inf:
+        self._append(self.Entry(timestamp=timestamp, receive_rate=receive_rate))
+        # delete initial receive_rate Infinity if it is still a member
+        if self._entries[0].receive_rate == math.inf:
             del self._entries[0]
         # set the timestamp of the largest item to the current time, delete all other items
-        self._entries = [self.Entry(timestamp=timestamp, value=self.max_value)]
+        self._entries = [self.Entry(timestamp=timestamp, receive_rate=self.max_receive_rate)]
 
     @property
-    def max_value(self):
-        return max(value for _, value in self._entries)
+    def max_receive_rate(self):
+        return max(receive_rate for _, receive_rate in self._entries)
 
     def update(self, receive_rate, timestamp, rtt):
-        self._append(self.Entry(timestamp=timestamp, value=receive_rate))
-        # delete values older than two round-trip times
+        self._append(self.Entry(timestamp=timestamp, receive_rate=receive_rate))
+        # delete receive_rates older than two round-trip times
         self._entries = [recv for recv in self._entries if calculate_time_elapsed(recv.timestamp, timestamp) < 2 * rtt]
 
     def _append(self, entry):
@@ -164,6 +165,8 @@ class ReceiveRateSet:
 
 
 class ServerSideConnection(Connection):
+    MAXIMUM_BACKOFF_INTERVAL = 64  # t_mbi, in seconds
+
     def __init__(self, shutdown, spawn, send, resource_id, encoders):
         """
         :param shutdown:     cf. Connection
@@ -185,72 +188,95 @@ class ServerSideConnection(Connection):
         self.initial_allowed_sending_rate = None
         self.time_last_doubled = 0  # tld, during slow-start, in seconds
         self.rtt = None  # R
-        self.received_initial_feedback = False
         # list of tuples with timestamp in seconds and estimated receive rate at the receiver
         self.recv_set = ReceiveRateSet()
-        self.loss_event_rate = 0
+        self.loss_event_rate = 0  # p
+        self.tcp_sending_rate = None  # X_bps
 
         self.no_feedback_timer = Timer(self.spawn)
         self.no_feedback_timer.add_listener(self.handle_no_feedback_timer_expired)
-        self.no_feedback_timer.reset(2)  # in seconds
+
+    @property
+    def current_timestamp(self):  # in seconds
+        return calculate_time_elapsed(self.initial_timestamp, trio.current_time())
 
     def shutdown(self):
         self.no_feedback_timer.clear_listeners()
         super().shutdown()
 
     def handle_no_feedback_timer_expired(self):
-        pass
+        # RFC 5348 Section 4.4
+        receive_rate = self.recv_set.max_receive_rate
 
-    @property
-    def current_timestamp(self):  # in seconds
-        return calculate_time_elapsed(self.initial_timestamp, trio.current_time())
+        def update_limits(timer_limit):
+            if timer_limit < SEGMENT_SIZE / self.MAXIMUM_BACKOFF_INTERVAL:
+                timer_limit = SEGMENT_SIZE / self.MAXIMUM_BACKOFF_INTERVAL
+            self.recv_set = ReceiveRateSet(receive_rate=timer_limit / 2, timestamp=self.current_timestamp)
+            self.update_allowed_sending_rate(receive_rate)
+
+        if self.rtt is None or self.loss_event_rate == 0:
+            self.allowed_sending_rate = max(self.allowed_sending_rate / 2, SEGMENT_SIZE / self.MAXIMUM_BACKOFF_INTERVAL)
+        # elif "sender has been idle ever since no_feedback_timer was set" never happens in our case
+        elif self.tcp_sending_rate > 2 * receive_rate:
+            update_limits(receive_rate)
+        else:
+            update_limits(self.tcp_sending_rate / 2)
+
+        self.no_feedback_timer.reset(max(4 * self.rtt, 2 * SEGMENT_SIZE / self.allowed_sending_rate))
 
     def update_rtt(self, timestamp, delay):  # timestamp in seconds, delay in seconds
         r_sample = calculate_time_elapsed(timestamp, self.current_timestamp) - delay
         q = 0.9
         self.rtt = r_sample if self.rtt is None else q * self.rtt + (1 - q) * r_sample
 
+    def update_allowed_sending_rate(self, receive_rate, previous_loss_event_rate=None):
+        # RFC 5348 Section 4.3
+        recv_limit = None
+        if previous_loss_event_rate is None:
+            previous_loss_event_rate = self.loss_event_rate
+        if False:  # TODO: calculate condition
+            if previous_loss_event_rate < self.loss_event_rate:  # TODO: regard NACKs as well
+                self.recv_set.halve()
+                receive_rate *= 0.85
+                self.recv_set.maximize(receive_rate, self.current_timestamp)
+                recv_limit = self.recv_set.max_receive_rate
+            else:
+                self.recv_set.maximize(receive_rate, self.current_timestamp)
+                recv_limit = self.recv_set.max_receive_rate
+        else:
+            self.recv_set.update(receive_rate, self.current_timestamp, self.rtt)
+            recv_limit = 2 * self.recv_set.max_receive_rate
+
+        if loss_event_rate > 0:
+            self.tcp_sending_rate = SEGMENT_SIZE / self.rtt * math.sqrt(2 * loss_event_rate / 3) + (rto * (
+                        3 * math.sqrt(3 * loss_event_rate / 8) * loss_event_rate * (1 + 32 * loss_event_rate ** 2)))
+            self.allowed_sending_rate = max(min(self.tcp_sending_rate, recv_limit),
+                                            SEGMENT_SIZE / self.MAXIMUM_BACKOFF_INTERVAL)
+        elif self.current_timestamp - self.time_last_doubled >= self.rtt:
+            self.allowed_sending_rate = max(min(2 * self.allowed_sending_rate, recv_limit),
+                                            self.initial_allowed_sending_rate)
+            self.time_last_doubled = self.current_timestamp
+
     async def handle_feedback(self, packet):
         # RFC 5348 Section 4.3
         delay, timestamp, receive_rate, loss_event_rate = packet.delay / 1000, packet.timestamp / 1000, \
                                                           packet.receive_rate, packet.loss_event_rate
+        previous_rtt = self.rtt
         self.update_rtt(timestamp, delay)
         previous_loss_event_rate, self.loss_event_rate = self.loss_event_rate, loss_event_rate
         rto = max(4 * self.rtt, 2 * SEGMENT_SIZE / self.allowed_sending_rate)
 
-        if not self.received_initial_feedback:
+        if previous_rtt is None:
             # RFC 5348 Section 4.2
-            self.received_initial_feedback = True
             w_init = min(4 * SEGMENT_SIZE, max(2 * SEGMENT_SIZE, 4380))
             self.initial_allowed_sending_rate = self.allowed_sending_rate = w_init / self.rtt
             self.time_last_doubled = self.current_timestamp
         else:
-            # RFC 5348 Section 4.3
-            t_mbi = 64  # maximum backoff interval in seconds
-            recv_limit = None
-            if False:  # TODO: calculate condition
-                if previous_loss_event_rate < loss_event_rate:  # TODO: regard NACKs as well
-                    self.recv_set.halve()
-                    receive_rate *= 0.85
-                    self.recv_set.maximize(receive_rate, self.current_timestamp)
-                    recv_limit = self.recv_set.max_value
-                else:
-                    self.recv_set.maximize(receive_rate, self.current_timestamp)
-                    recv_limit = self.recv_set.max_value
-            else:
-                self.recv_set.update(receive_rate, self.current_timestamp, self.rtt)
-                recv_limit = 2 * self.recv_set.max_value
-
-            if loss_event_rate > 0:
-                bps = SEGMENT_SIZE / self.rtt * math.sqrt(2 * loss_event_rate / 3) + (rto * (3 * math.sqrt(3 * loss_event_rate / 8) * loss_event_rate * (1 + 32 * loss_event_rate ** 2)))
-                self.allowed_sending_rate = max(min(bps, recv_limit), SEGMENT_SIZE / t_mbi)
-            elif self.current_timestamp - self.time_last_doubled >= self.rtt:
-                self.allowed_sending_rate = max(min(2 * self.allowed_sending_rate, recv_limit), self.initial_allowed_sending_rate)
-                self.time_last_doubled = self.current_timestamp
+            self.update_allowed_sending_rate(receive_rate, previous_loss_event_rate)
 
         # TODO: for oscillation: cf. RFC 5348 Section 4.5
 
-        self.set_no_feedback_timer(rto)
+        self.no_feedback_timer.reset(rto)
 
     async def handle_request_resource(self, packet):
         if self.resource_id != packet.resource_id:
@@ -260,6 +286,7 @@ class ServerSideConnection(Connection):
             self.reverse = packet.flags is RequestResourceFlags.REVERSE
             self.connected = True
             self.stop_at_block_id = -1 if self.reverse else len(self.encoders)
+            self.no_feedback_timer.reset(2)
             self.spawn(self.send_blocks)
         else:
             pass  # already connected and sending
