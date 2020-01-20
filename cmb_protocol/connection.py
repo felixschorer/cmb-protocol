@@ -248,8 +248,8 @@ class ServerSideConnection(Connection):
             recv_limit = 2 * self.recv_set.max_receive_rate
 
         if loss_event_rate > 0:
-            self.tcp_sending_rate = SEGMENT_SIZE / self.rtt * math.sqrt(2 * loss_event_rate / 3) + (rto * (
-                        3 * math.sqrt(3 * loss_event_rate / 8) * loss_event_rate * (1 + 32 * loss_event_rate ** 2)))
+            self.tcp_sending_rate = SEGMENT_SIZE / (self.rtt * math.sqrt(2 * loss_event_rate / 3) + (rto * (
+                        3 * math.sqrt(3 * loss_event_rate / 8) * loss_event_rate * (1 + 32 * loss_event_rate ** 2))))
             self.allowed_sending_rate = max(min(self.tcp_sending_rate, recv_limit),
                                             SEGMENT_SIZE / self.MAXIMUM_BACKOFF_INTERVAL)
         elif self.current_timestamp - self.time_last_doubled >= self.rtt:
