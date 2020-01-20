@@ -166,6 +166,7 @@ class ReceiveRateSet:
 
 class ServerSideConnection(Connection):
     MAXIMUM_BACKOFF_INTERVAL = 64  # t_mbi, in seconds
+    SCHEDULING_GRANULARITY = 0.001
 
     def __init__(self, shutdown, spawn, send, resource_id, encoders):
         """
@@ -292,8 +293,8 @@ class ServerSideConnection(Connection):
             pass  # already connected and sending
 
     async def send_blocks(self):
-        sequence_number = 0
-        try:
+        def packets():
+            sequence_number = 0
             for block_id, encoder in reversed(self.encoders.items()) if self.reverse else self.encoders.items():
                 for fec_data in encoder.source_packets:
                     # check in every iteration if we have received a stop signal in the meantime
@@ -302,16 +303,30 @@ class ServerSideConnection(Connection):
                         return
 
                     timestamp = self.current_timestamp * 1000
-                    packet = Data(block_id=block_id,
-                                  timestamp=timestamp,
-                                  estimated_rtt=0,
-                                  sequence_number=sequence_number,
-                                  fec_data=fec_data)
+                    yield Data(block_id=block_id,
+                               timestamp=timestamp,
+                               estimated_rtt=0,
+                               sequence_number=sequence_number,
+                               fec_data=fec_data)
                     sequence_number = (sequence_number + 1) % (2 ** 24)
+
+        packet_iter = packets()
+
+        # RFC 5348 Section 4.6 and 8.3
+        t = self.current_timestamp  # set t_0
+        while True:
+            t_inter_packet_interval = SEGMENT_SIZE / self.allowed_sending_rate
+            t_delta = min(t_inter_packet_interval, self.SCHEDULING_GRANULARITY, self.rtt if self.rtt is not None else math.inf) / 2
+            if self.current_timestamp > t - t_delta:
+                try:
+                    packet = next(packet_iter)
                     await self.send(packet)
-                    await trio.sleep(0.01)
-        finally:
-            self.shutdown()
+                    t += t_inter_packet_interval  # set t_(i+1)
+                except StopIteration:
+                    self.shutdown()
+                    return
+            else:
+                await trio.sleep(self.SCHEDULING_GRANULARITY)
 
     async def handle_ack_block(self, packet):
         pass
