@@ -158,6 +158,7 @@ class ReceiveRateSet:
 
     def _append(self, entry):
         self._entries.append(entry)
+        # limit set to 3 most recent entries
         if len(self._entries) > 3:
             del self._entries[:-3]
 
