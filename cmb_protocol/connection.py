@@ -141,7 +141,7 @@ class ReceiveRateSet:
         self.entries = [(timestamp, recv / 2) for timestamp, recv in self.entries]
 
     def maximize(self, receive_rate, timestamp):
-        self.entries.append(self.Entry(timestamp=timestamp, value=receive_rate))
+        self._append(self.Entry(timestamp=timestamp, value=receive_rate))
         # delete initial value Infinity from X_recv_set, if it is still a member
         if self.entries[0].value == math.inf:
             del self.entries[0]
@@ -153,9 +153,14 @@ class ReceiveRateSet:
         return max(value for _, value in self.entries)
 
     def update(self, receive_rate, timestamp, rtt):
-        self.entries.append(self.Entry(timestamp=timestamp, value=receive_rate))
+        self._append(self.Entry(timestamp=timestamp, value=receive_rate))
         # delete from X_recv_set values older than two round-trip times
         self.entries = [recv for recv in self.entries if calculate_time_elapsed(recv.timestamp, timestamp) < 2 * rtt]
+
+    def _append(self, entry):
+        self.entries.append(entry)
+        if len(self.entries) > 3:
+            del self.entries[:-3]
 
 
 class ServerSideConnection(Connection):
