@@ -1,12 +1,11 @@
 import math
-from collections import namedtuple
-
 import trio
+
+from collections import namedtuple
 from abc import ABC
 
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
-from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK, calculate_number_of_blocks, \
-    calculate_block_size
+from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size
 from cmb_protocol.helpers import calculate_time_elapsed
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
     Error, ErrorCode, Packet, Feedback
@@ -142,7 +141,7 @@ class ReceiveRateSet:
 
     def maximize(self, receive_rate, timestamp):
         self._append(self.Entry(timestamp=timestamp, value=receive_rate))
-        # delete initial value Infinity from X_recv_set, if it is still a member
+        # delete initial value Infinity if it is still a member
         if self.entries[0].value == math.inf:
             del self.entries[0]
         # set the timestamp of the largest item to the current time, delete all other items
@@ -154,7 +153,7 @@ class ReceiveRateSet:
 
     def update(self, receive_rate, timestamp, rtt):
         self._append(self.Entry(timestamp=timestamp, value=receive_rate))
-        # delete from X_recv_set values older than two round-trip times
+        # delete values older than two round-trip times
         self.entries = [recv for recv in self.entries if calculate_time_elapsed(recv.timestamp, timestamp) < 2 * rtt]
 
     def _append(self, entry):
