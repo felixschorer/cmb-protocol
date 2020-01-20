@@ -14,45 +14,57 @@ class Timer:
         """
         self._spawn = spawn
         self._listeners = set()
-        self._starting = False
         self._cancel_scope = None
         self._deadline = None
 
     def reset(self, timeout):
+        self._stop_waiter()
         self._deadline = trio.current_time() + timeout
-        if len(self._listeners):
-            self._start_waiter()
+        self._start_waiter()
 
     def add_listener(self, listener):
         self._listeners.add(listener)
-        if self._deadline is not None:
-            self._start_waiter()
+        self._start_waiter()
 
     def remove_listener(self, listener):
         self._listeners.remove(listener)
-        if len(self._listeners) == 0 and self._cancel_scope is not None:
-            self._cancel_scope.cancel()
+        if len(self._listeners) == 0:
+            self._stop_waiter()
 
     def clear_listeners(self):
         self._listeners.clear()
+        self._stop_waiter()
+
+    def clear(self):
+        self._deadline = None
+        self._stop_waiter()
+
+    def _stop_waiter(self):
         if self._cancel_scope is not None:
             self._cancel_scope.cancel()
+            self._cancel_scope = None
 
     def _start_waiter(self):
-        async def waiter():
-            self._starting = False
-            with trio.move_on_at(self._deadline) as cancel_scope:
-                self._cancel_scope = cancel_scope
-                await trio.sleep_forever()
+        if self._cancel_scope is None \
+                and self._deadline is not None \
+                and self._deadline >= trio.current_time() \
+                and len(self._listeners) > 0:
+            self._cancel_scope = trio.CancelScope()
+            self._spawn(self._waiter, self._cancel_scope, self._deadline)
+
+    # gets passed cancel_scope and deadline explicitly
+    # since self._cancel_scope and self._deadline might change until this task is started
+    async def _waiter(self, cancel_scope, deadline):
+        with cancel_scope:
+            await trio.sleep_until(deadline)
+            # in case this task was not cancelled,
+            # self._cancel_scope and self._deadline should equal cancel_scope and deadline respectively
+            assert self._cancel_scope == cancel_scope
+            assert self._deadline == deadline
             self._cancel_scope = None
+            self._deadline = None
             for listener in self._listeners:
                 listener()
-
-        if self._cancel_scope is not None:
-            self._cancel_scope.deadline = self._deadline
-        elif not self._starting:
-            self._starting = True
-            self._spawn(waiter)
 
 
 async def spawn_child_nursery(spawn, shutdown_timeout=math.inf):
