@@ -34,8 +34,9 @@ class Timer:
             self._cancel_scope.cancel()
 
     def clear_listeners(self):
-        for listener in self._listeners:
-            self.remove_listener(listener)
+        self._listeners.clear()
+        if self._cancel_scope is not None:
+            self._cancel_scope.cancel()
 
     def _start_waiter(self):
         async def waiter():
@@ -44,7 +45,6 @@ class Timer:
                 self._cancel_scope = cancel_scope
                 await trio.sleep_forever()
             self._cancel_scope = None
-            self._deadline = None
             for listener in self._listeners:
                 listener()
 
