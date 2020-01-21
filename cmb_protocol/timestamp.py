@@ -50,9 +50,9 @@ class Timestamp:
     def __lt__(self, other):  # self < other (self older than other)
         if isinstance(other, Timestamp):
             # Due to wrap around at approx. 4:40h, there is no way of knowing which timestamp is older.
-            # However, we can assume that the order which produces the smallest duration to be correct.
-            # This works in our case as we won't be comparing timestamps with each other
-            # which are apart by more than a few seconds.
+            # However, we can assume the order which produces the smallest duration to be correct.
+            # This produces correct results for two timestamps which are apart less than approx. 2:20h.
+            # In our case we won't be comparing timestamps with each other which are apart by more than a few seconds.
             return self - other > other - self
         else:
             return NotImplemented
@@ -60,9 +60,9 @@ class Timestamp:
     def __gt__(self, other):  # self > other (self newer than other)
         if isinstance(other, Timestamp):
             # Due to wrap around at approx. 4:40h, there is no way of knowing which timestamp is older.
-            # However, we can assume that the order which produces the smallest duration to be correct.
-            # This works in our case as we won't be comparing timestamps with each other
-            # which are apart by more than a few seconds.
+            # However, we can assume the order which produces the smallest duration to be correct.
+            # This produces correct results for two timestamps which are apart less than approx. 2:20h.
+            # In our case we won't be comparing timestamps with each other which are apart by more than a few seconds.
             return self - other < other - self
         else:
             return NotImplemented
