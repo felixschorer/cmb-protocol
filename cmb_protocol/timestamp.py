@@ -11,7 +11,7 @@ class Timestamp:
     timestamps must not be compared with timestamps created in a different trio context.
     """
 
-    MAX_VALUE = 2**24 / 1000  # 24 bit, in seconds, millisecond accuracy
+    MAX_VALUE = 2**24 / 1000
 
     def __init__(self, value):
         self.value = value % self.MAX_VALUE
