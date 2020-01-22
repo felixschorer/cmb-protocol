@@ -3,6 +3,7 @@ from abc import ABCMeta, ABC, abstractmethod
 from enum import unique, Enum, IntFlag, IntEnum
 
 from cmb_protocol.helpers import unpack_uint48, pack_uint48, pack_uint24, unpack_uint24
+from cmb_protocol.timestamp import Timestamp
 
 
 class _PacketMeta(ABCMeta):
@@ -226,13 +227,14 @@ class Feedback(Packet):
     def __init__(self, delay, timestamp, receive_rate, loss_event_rate):
         super().__init__()
         self.delay = delay
+        assert isinstance(timestamp, Timestamp)
         self.timestamp = timestamp
         self.receive_rate = receive_rate
         self.loss_event_rate = loss_event_rate
 
     def _serialize_fields(self):
-        values = self.delay, \
-                 pack_uint24(self.timestamp), \
+        values = int(self.delay * 1000), \
+                 self.timestamp.to_bytes(), \
                  bytes(1), \
                  self.receive_rate, \
                  self.loss_event_rate
@@ -241,8 +243,8 @@ class Feedback(Packet):
     @classmethod
     def _parse_fields(cls, packet_bytes):
         delay, timestamp, reserved, receive_rate, loss_event_rate = struct.unpack(cls.__format, packet_bytes)
-        return Feedback(delay=delay,
-                        timestamp=unpack_uint24(timestamp),
+        return Feedback(delay=delay / 1000,
+                        timestamp=Timestamp.from_bytes(timestamp),
                         receive_rate=receive_rate,
                         loss_event_rate=loss_event_rate)
 

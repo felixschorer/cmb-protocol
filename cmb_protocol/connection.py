@@ -9,6 +9,7 @@ from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_o
 from cmb_protocol.helpers import calculate_time_elapsed
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
     Error, ErrorCode, Packet, Feedback
+from cmb_protocol.timestamp import Timestamp
 
 from cmb_protocol.trio_util import Timer
 
@@ -182,7 +183,6 @@ class ServerSideConnection(Connection):
         self.connected = False
         self.reverse = None
         self.stop_at_block_id = None
-        self.initial_timestamp = trio.current_time()
 
         # TFRC parameters, RFC 5348 Section 4.2
         self.allowed_sending_rate = SEGMENT_SIZE  # X, in bytes per second
@@ -201,10 +201,6 @@ class ServerSideConnection(Connection):
         self.no_feedback_timer = Timer(self.spawn)
         self.no_feedback_timer.add_listener(self.handle_no_feedback_timer_expired)
 
-    @property
-    def current_timestamp(self):  # in seconds
-        return calculate_time_elapsed(self.initial_timestamp, trio.current_time())
-
     def shutdown(self):
         self.no_feedback_timer.clear_listeners()
         super().shutdown()
@@ -216,7 +212,7 @@ class ServerSideConnection(Connection):
         def update_limits(timer_limit):
             if timer_limit < SEGMENT_SIZE / self.MAXIMUM_BACKOFF_INTERVAL:
                 timer_limit = SEGMENT_SIZE / self.MAXIMUM_BACKOFF_INTERVAL
-            self.recv_set = ReceiveRateSet(receive_rate=timer_limit / 2, timestamp=self.current_timestamp)
+            self.recv_set = ReceiveRateSet(receive_rate=timer_limit / 2, timestamp=Timestamp.now())
             self.update_allowed_sending_rate(receive_rate)
 
         if self.rtt is None or self.loss_event_rate == 0:
@@ -230,7 +226,7 @@ class ServerSideConnection(Connection):
         self.no_feedback_timer.reset(max(4 * self.rtt, 2 * SEGMENT_SIZE / self.allowed_sending_rate))
 
     def update_rtt(self, timestamp, delay):  # timestamp in seconds, delay in seconds
-        r_sample = calculate_time_elapsed(timestamp, self.current_timestamp) - delay
+        r_sample = calculate_time_elapsed(timestamp, Timestamp.now()) - delay
         q = 0.9
         self.rtt = r_sample if self.rtt is None else q * self.rtt + (1 - q) * r_sample
 
@@ -242,13 +238,13 @@ class ServerSideConnection(Connection):
             if previous_loss_event_rate < self.loss_event_rate:  # TODO: regard NACKs as well
                 self.recv_set.halve()
                 receive_rate *= 0.85
-                self.recv_set.maximize(receive_rate, self.current_timestamp)
+                self.recv_set.maximize(receive_rate, Timestamp.now())
                 recv_limit = self.recv_set.max_receive_rate
             else:
-                self.recv_set.maximize(receive_rate, self.current_timestamp)
+                self.recv_set.maximize(receive_rate, Timestamp.now())
                 recv_limit = self.recv_set.max_receive_rate
         else:
-            self.recv_set.update(receive_rate, self.current_timestamp, self.rtt)
+            self.recv_set.update(receive_rate, Timestamp.now(), self.rtt)
             recv_limit = 2 * self.recv_set.max_receive_rate
 
         if self.loss_event_rate > 0:
@@ -256,14 +252,14 @@ class ServerSideConnection(Connection):
                         3 * math.sqrt(3 * self.loss_event_rate / 8) * self.loss_event_rate * (1 + 32 * self.loss_event_rate ** 2))))
             self.allowed_sending_rate = max(min(self.tcp_sending_rate, recv_limit),
                                             SEGMENT_SIZE / self.MAXIMUM_BACKOFF_INTERVAL)
-        elif calculate_time_elapsed(self.time_last_doubled, self.current_timestamp) >= self.rtt:
+        elif calculate_time_elapsed(self.time_last_doubled, Timestamp.now()) >= self.rtt:
             self.allowed_sending_rate = max(min(2 * self.allowed_sending_rate, recv_limit),
                                             self.initial_allowed_sending_rate)
-            self.time_last_doubled = self.current_timestamp
+            self.time_last_doubled = Timestamp.now()
 
     async def handle_feedback(self, packet):
         # RFC 5348 Section 4.3
-        delay, timestamp, receive_rate, loss_event_rate = packet.delay / 1000, packet.timestamp / 1000, \
+        delay, timestamp, receive_rate, loss_event_rate = packet.delay, packet.timestamp, \
                                                           packet.receive_rate, packet.loss_event_rate
         previous_rtt = self.rtt
         self.update_rtt(timestamp, delay)
@@ -274,7 +270,7 @@ class ServerSideConnection(Connection):
             # RFC 5348 Section 4.2
             w_init = min(4 * SEGMENT_SIZE, max(2 * SEGMENT_SIZE, 4380))
             self.initial_allowed_sending_rate = self.allowed_sending_rate = w_init / self.rtt
-            self.time_last_doubled = self.current_timestamp
+            self.time_last_doubled = Timestamp.now()
         else:
             self.update_allowed_sending_rate(receive_rate, previous_loss_event_rate)
 
@@ -285,7 +281,7 @@ class ServerSideConnection(Connection):
         # RFC 5348 Section 8.2.1
         self.t_new = timestamp
         t_old = calculate_time_elapsed(self.rtt, self.t_new)
-        self.t_next = self.current_timestamp
+        self.t_next = Timestamp.now()
         self.data_limited = not (t_old < self.not_limited1 <= self.t_new or t_old < self.not_limited2 <= self.t_new)
 
         if self.not_limited1 <= self.t_new < self.not_limited2:
@@ -314,7 +310,7 @@ class ServerSideConnection(Connection):
                     if finished:
                         return
 
-                    timestamp = self.current_timestamp * 1000
+                    timestamp = Timestamp.now()
                     yield Data(block_id=block_id,
                                timestamp=timestamp,
                                estimated_rtt=0,
@@ -344,7 +340,7 @@ class ServerSideConnection(Connection):
                     self.not_limited1 = self.t_new
                 elif self.not_limited2 <= self.t_next:
                     # goal: self.not_limited2 > self.t_next
-                    self.not_limited2 = self.current_timestamp
+                    self.not_limited2 = Timestamp.now()
 
                 await trio.sleep(self.SCHEDULING_GRANULARITY)
 
