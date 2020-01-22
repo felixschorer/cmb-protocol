@@ -124,7 +124,7 @@ class TFRCSender:
                 await trio.sleep(SCHEDULING_GRANULARITY)
 
     def _check_no_feedback_timer_expired(self):
-        if self.no_feedback_deadline <= Timestamp.now():
+        while self.no_feedback_deadline <= Timestamp.now():
             # RFC 5348 Section 4.4
             receive_rate = self.recv_set.max_receive_rate
 
@@ -143,7 +143,7 @@ class TFRCSender:
             else:
                 update_limits(self.tcp_sending_rate / 2)
 
-            self.no_feedback_deadline = Timestamp.now() + max(4 * self.rtt, 2 * self.segment_size / self.allowed_sending_rate)
+            self.no_feedback_deadline += max(4 * self.rtt, 2 * self.segment_size / self.allowed_sending_rate)
     
     def _update_rtt(self, timestamp, delay):  # timestamp in seconds, delay in seconds
         r_sample = Timestamp.now() - timestamp - delay
