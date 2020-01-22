@@ -16,19 +16,20 @@ class ReceiveRateSet:
     def halve(self):
         self._entries = [(timestamp, recv / 2) for timestamp, recv in self._entries]
 
-    def maximize(self, receive_rate, timestamp):
-        self._append(self.Entry(timestamp=timestamp, receive_rate=receive_rate))
+    def maximize(self, receive_rate):
+        self._append(self.Entry(timestamp=Timestamp.now(), receive_rate=receive_rate))
         # delete initial receive_rate Infinity if it is still a member
         if self._entries[0].receive_rate == math.inf:
             del self._entries[0]
         # set the timestamp of the largest item to the current time, delete all other items
-        self._entries = [self.Entry(timestamp=timestamp, receive_rate=self.max_receive_rate)]
+        self._entries = [self.Entry(timestamp=Timestamp.now(), receive_rate=self.max_receive_rate)]
 
     @property
     def max_receive_rate(self):
         return max(receive_rate for _, receive_rate in self._entries)
 
-    def update(self, receive_rate, timestamp, rtt):
+    def update(self, receive_rate, rtt):
+        timestamp = Timestamp.now()
         self._append(self.Entry(timestamp=timestamp, receive_rate=receive_rate))
         # delete receive_rates older than two round-trip times
         self._entries = [recv for recv in self._entries if timestamp - recv.timestamp < 2 * rtt]
@@ -92,8 +93,9 @@ class TFRCSender:
         if self.not_limited1 <= self.t_new < self.not_limited2:
             self.not_limited1 = self.not_limited2
 
+    @property
     @async_generator
-    def send_windows(self):
+    async def sending_credits(self):
         sequence_number = 0
         t = Timestamp.now()
         while True:
@@ -156,13 +158,13 @@ class TFRCSender:
             if previous_loss_event_rate < self.loss_event_rate:  # TODO: regard NACKs as well
                 self.recv_set.halve()
                 receive_rate *= 0.85
-                self.recv_set.maximize(receive_rate, Timestamp.now())
+                self.recv_set.maximize(receive_rate)
                 recv_limit = self.recv_set.max_receive_rate
             else:
-                self.recv_set.maximize(receive_rate, Timestamp.now())
+                self.recv_set.maximize(receive_rate)
                 recv_limit = self.recv_set.max_receive_rate
         else:
-            self.recv_set.update(receive_rate, Timestamp.now(), self.rtt)
+            self.recv_set.update(receive_rate, self.rtt)
             recv_limit = 2 * self.recv_set.max_receive_rate
 
         if self.loss_event_rate > 0:

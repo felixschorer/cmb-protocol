@@ -173,7 +173,7 @@ class ServerSideConnection(Connection):
 
         packet_iter = packets()
 
-        async for timestamp, rtt, sequence_number in self.tfrc.send_windows():
+        async for timestamp, rtt, sequence_number in self.tfrc.sending_credits:
             try:
                 block_id, fec_data = next(packet_iter)
                 packet = Data(block_id, timestamp, rtt, sequence_number, fec_data)
