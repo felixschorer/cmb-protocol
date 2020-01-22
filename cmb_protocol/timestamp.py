@@ -11,6 +11,8 @@ class Timestamp:
     timestamps must not be compared with timestamps created in a different trio context.
     """
 
+    __slots__ = 'value',
+
     MAX_VALUE = 2**24 / 1000
 
     def __init__(self, value):
