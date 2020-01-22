@@ -35,7 +35,3 @@ def once(func):
             func(*args, **kwargs)
 
     return wrapped
-
-
-def calculate_time_elapsed(start, end):  # in seconds
-    return (int((end - start) * 1000) % (2 ** 24)) / 1000
