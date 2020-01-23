@@ -6,11 +6,10 @@ from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_o
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
     Error, ErrorCode, Packet, Feedback
 from cmb_protocol.tfrc import TFRCSender
+from cmb_protocol.timestamp import Timestamp
 
 
 # called s in TFRC, in bytes
-from cmb_protocol.timestamp import Timestamp
-
 SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + Data.HEADER_SIZE + RAPTORQ_HEADER_SIZE + MAXIMUM_TRANSMISSION_UNIT
 
 
@@ -54,7 +53,7 @@ NDUPACK = 3
 
 class LossHistory:
     Entry = namedtuple('Entry', ['timestamp', 'sequence_number'])
-    LossEvent = namedtuple('LossEvent', ['timestamp', 'loss_sequence_numbers'])
+    LossEvent = namedtuple('LossEvent', ['timestamp', 'loss_sequence_numbers', 'size_of_loss_interval'])
 
     def __init__(self):
         # initialize with -1 to be able to detect the packet with sequence number 0
@@ -75,9 +74,14 @@ class LossHistory:
             for loss_sequence_number in range(before.sequence_number + 1, after.sequence_number):
                 loss_timestamp = before.timestamp + (after.timestamp - before.timestamp) * _dist(loss_sequence_number, before.sequence_numer) / _dist(after.sequence_numer, before.sequence_numer)
                 if len(self.loss_events) == 0 or self.loss_events[-1].timestamp + rtt < loss_timestamp:  # TODO: what happens if rtt is 0?
-                    self.loss_events.append(self.LossEvent(timestamp=loss_timestamp, loss_sequence_numbers=[loss_sequence_number]))
+                    if len(self.loss_events) > 1:
+                        # RFC 5348 Section 5.3
+                        self.loss_events[-2].size_of_loss_interval = loss_sequence_number - self.loss_events[-2].loss_sequence_numbers[0]
+                    self.loss_events.append(self.LossEvent(timestamp=loss_timestamp, loss_sequence_numbers=[loss_sequence_number], size_of_loss_interval=1))
                 else:
                     self.loss_events[-1].loss_sequence_numbers.append(loss_sequence_number)
+                    # RFC 5348 Section 5.3
+                    self.loss_events[-1].size_of_loss_interval = max([n.sequence_number for n in self.received_sequence_numbers]) - self.loss_events[-1].loss_sequence_numbers[0] + 1
             del self.received_sequence_numbers[0]
 
 
