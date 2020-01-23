@@ -39,6 +39,11 @@ class Timer:
         self._deadline = None
         self._stop_waiter()
 
+    def expire(self):
+        self.clear()
+        for listener in self._listeners:
+            listener()
+
     def _stop_waiter(self):
         if self._cancel_scope is not None:
             self._cancel_scope.cancel()

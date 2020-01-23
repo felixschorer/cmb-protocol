@@ -4,7 +4,70 @@ from collections import namedtuple
 import trio
 from async_generator import async_generator, yield_
 
+from cmb_protocol.sequencenumber import SequenceNumber
 from cmb_protocol.timestamp import Timestamp
+
+
+NDUPACK = 3
+NUMBER_OF_LOSS_INTERVALS = 8
+
+
+class LossEventRateCalculator:
+    Entry = namedtuple('Entry', ['timestamp', 'sequence_number'])
+
+    def __init__(self):
+        # initialize with -1 to be able to detect the packet with sequence number 0
+        self._received_sequence_numbers = [self.Entry(timestamp=Timestamp.now(), sequence_number=SequenceNumber(-1))]
+        self._loss_events = []
+        self.loss_event_rate = 0
+
+    def update(self, sequence_number, rtt):
+
+        # RFC 5348 Section 5.1
+        self._received_sequence_numbers.append(self.Entry(timestamp=Timestamp.now(), sequence_number=sequence_number))
+        self._received_sequence_numbers.sort(key=lambda x: x.sequence_number)
+        if len(self._received_sequence_numbers) == NDUPACK + 1:
+            before, after = self._received_sequence_numbers[:2]
+            # RFC 5348 Section 5.2
+            for loss_sequence_number in range(before.sequence_number.value + 1, after.sequence_number.value):
+                loss_sequence_number = SequenceNumber(loss_sequence_number)
+                loss_timestamp = before.timestamp + (after.timestamp - before.timestamp) * (loss_sequence_number - before.sequence_numer) / (after.sequence_numer - before.sequence_numer)
+                if len(self._loss_events) == 0 or self._loss_events[-1].timestamp + rtt < loss_timestamp:  # TODO: what happens if rtt is 0?
+                    # start new loss event, insert at index 0
+                    self._loss_events.insert(0, self.Entry(timestamp=loss_timestamp, sequence_number=loss_sequence_number))
+                    if len(self._loss_events) > NUMBER_OF_LOSS_INTERVALS:
+                        del self._loss_events[NUMBER_OF_LOSS_INTERVALS:]
+                    self._recalculate()
+            del self._received_sequence_numbers[0]
+
+    def _recalculate(self):
+        if len(self._loss_events) == 0:
+            return
+
+        # RFC 5348 Section 5.3
+        interval_sizes = [self._received_sequence_numbers[-1].sequence_number - self._loss_events[0].sequence_number + 1]
+        for i in range(1, len(self._loss_events)):
+            interval_sizes[i] = self._loss_events[i - 1].sequence_number - self._loss_events[i].sequence_number
+
+        # RFC 5348 Section 5.4
+        weights = [1 if i < NUMBER_OF_LOSS_INTERVALS / 2 else 2 * (NUMBER_OF_LOSS_INTERVALS - i) / (NUMBER_OF_LOSS_INTERVALS + 2) for i in range(0, len(self._loss_events))]
+
+        i_tot0 = 0
+        i_tot1 = 0
+        w_tot = 0
+        for i in range(len(self._loss_events) - 1):
+            i_tot0 = i_tot0 + interval_sizes[i] * weights[i]
+            w_tot = w_tot + weights[i]
+
+        for i in range(1, len(self._loss_events)):
+            i_tot1 = i_tot1 + interval_sizes[i] * weights[i - 1]
+
+        i_tot = max(i_tot0, i_tot1)
+        i_mean = i_tot / w_tot
+
+        self.loss_event_rate = 1 / i_mean
+
+        # TODO (OPTIONAL): RFC 5348 Section 5.5
 
 
 class ReceiveRateSet:
@@ -96,7 +159,7 @@ class TFRCSender:
     @property
     @async_generator
     async def sending_credits(self):
-        sequence_number = 0
+        sequence_number = SequenceNumber(0)
         t = Timestamp.now()
         while True:
             self._check_no_feedback_timer_expired()
@@ -108,7 +171,7 @@ class TFRCSender:
             if Timestamp.now() > t - t_delta:
                 try:
                     await yield_((Timestamp.now(), self.rtt, sequence_number))
-                    sequence_number = (sequence_number + 1) % (2 ** 24)
+                    sequence_number += 1
                     t += t_inter_packet_interval  # set t_(i+1)
                 except StopIteration:
                     return

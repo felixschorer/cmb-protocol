@@ -3,6 +3,7 @@ from abc import ABCMeta, ABC, abstractmethod
 from enum import unique, Enum, IntFlag, IntEnum
 
 from cmb_protocol.helpers import unpack_uint48, pack_uint48, pack_uint24, unpack_uint24
+from cmb_protocol.sequencenumber import SequenceNumber
 from cmb_protocol.timestamp import Timestamp
 
 
@@ -111,13 +112,14 @@ class Data(Packet):
         assert isinstance(timestamp, Timestamp)
         self.timestamp = timestamp
         self.estimated_rtt = estimated_rtt
+        assert isinstance(sequence_number, SequenceNumber)
         self.sequence_number = sequence_number
 
     def _serialize_fields(self):
         values = pack_uint48(self.block_id), \
                  self.timestamp.to_bytes(), \
                  self.estimated_rtt, \
-                 pack_uint24(self.sequence_number)
+                 self.sequence_number.to_bytes()
         return struct.pack(self.__format, *values) + self.fec_data
 
     @classmethod
@@ -127,7 +129,7 @@ class Data(Packet):
         return Data(block_id=unpack_uint48(block_id),
                     timestamp=Timestamp.from_bytes(timestamp),
                     estimated_rtt=estimated_rtt,
-                    sequence_number=unpack_uint24(sequence_number),
+                    sequence_number=SequenceNumber.from_bytes(sequence_number),
                     fec_data=fec_data)
 
 

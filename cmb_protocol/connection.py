@@ -1,15 +1,16 @@
 from abc import ABC
-from collections import namedtuple
 
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
     Error, ErrorCode, Packet, Feedback
-from cmb_protocol.tfrc import TFRCSender
-from cmb_protocol.timestamp import Timestamp
+from cmb_protocol.tfrc import TFRCSender, LossEventRateCalculator
 
 
 # called s in TFRC, in bytes
+from cmb_protocol.timestamp import Timestamp
+from cmb_protocol.trio_util import Timer
+
 SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + Data.HEADER_SIZE + RAPTORQ_HEADER_SIZE + MAXIMUM_TRANSMISSION_UNIT
 
 
@@ -48,67 +49,6 @@ class Connection(ABC):
         await self._send(packet)
 
 
-NDUPACK = 3
-NUMBER_OF_LOSS_INTERVALS = 8
-
-
-class LossEventRateEstimator:
-    Entry = namedtuple('Entry', ['timestamp', 'sequence_number'])
-
-    def __init__(self):
-        # initialize with -1 to be able to detect the packet with sequence number 0
-        self._received_sequence_numbers = [self.Entry(timestamp=Timestamp.now(), sequence_number=-1)]
-        self._loss_events = []
-        self.loss_event_rate = 0
-
-    def update(self, sequence_number, rtt):
-        def _dist(sequence_number1, sequence_number2):
-            sequence_number_max = 2**24
-            return (sequence_number1 + sequence_number_max - sequence_number2) % sequence_number_max
-
-        # RFC 5348 Section 5.1
-        self._received_sequence_numbers.append(self.Entry(timestamp=Timestamp.now(), sequence_number=sequence_number))
-        self._received_sequence_numbers.sort(key=lambda x: x.sequence_number)
-        if len(self._received_sequence_numbers) == NDUPACK + 1:
-            before, after = self._received_sequence_numbers[:2]
-            # RFC 5348 Section 5.2
-            for loss_sequence_number in range(before.sequence_number + 1, after.sequence_number):
-                loss_timestamp = before.timestamp + (after.timestamp - before.timestamp) * _dist(loss_sequence_number, before.sequence_numer) / _dist(after.sequence_numer, before.sequence_numer)
-                if len(self._loss_events) == 0 or self._loss_events[-1].timestamp + rtt < loss_timestamp:  # TODO: what happens if rtt is 0?
-                    # start new loss event, insert at index 0
-                    self._loss_events.insert(0, self.Entry(timestamp=loss_timestamp, sequence_number=loss_sequence_number))
-            del self._received_sequence_numbers[0]
-
-        # RFC 5348 Section 5.3
-        interval_sizes = [self._received_sequence_numbers[-1].sequence_number - self._loss_events[0].sequence_number + 1]
-        for i in range(1, len(self._loss_events)):
-            interval_sizes[i] = self._loss_events[i - 1].sequence_number - self._loss_events[i].sequence_number
-
-        # RFC 5348 Section 5.4
-        if len(self._loss_events) > NUMBER_OF_LOSS_INTERVALS:
-            del self._loss_events[NUMBER_OF_LOSS_INTERVALS:]
-
-        if len(self._loss_events) == 0:
-            return
-
-        weights = [1 if i < NUMBER_OF_LOSS_INTERVALS / 2 else 2 * (NUMBER_OF_LOSS_INTERVALS - i) / (NUMBER_OF_LOSS_INTERVALS + 2) for i in range(0, len(self._loss_events))]
-
-        i_tot0 = 0
-        i_tot1 = 0
-        w_tot = 0
-        for i in range(len(self._loss_events) - 1):
-            i_tot0 = i_tot0 + interval_sizes[i] * weights[i]
-            w_tot = w_tot + weights[i]
-
-        for i in range(1, len(self._loss_events)):
-            i_tot1 = i_tot1 + interval_sizes[i] * weights[i - 1]
-
-        i_tot = max(i_tot0, i_tot1)
-        i_mean = i_tot / w_tot
-
-        self.loss_event_rate = 1 / i_mean
-
-
 class ClientSideConnection(Connection):
     def __init__(self, shutdown, spawn, send, write_blocks, resource_id, reverse):
         """
@@ -134,6 +74,15 @@ class ClientSideConnection(Connection):
 
         self.spawn(self.init_protocol)
 
+        # TFRC parameters
+        self.loss_event_rate_calculator = LossEventRateCalculator()
+        self.feedback_timer = Timer(self.spawn)
+        self.feedback_timer.add_listener(self.handle_feedback_timer_expired)
+
+        self.rtt = 0
+        self.timestamp = None
+        self.sequence_number = -1
+
     async def init_protocol(self):
         flags = RequestResourceFlags.REVERSE if self.reverse else RequestResourceFlags.NONE
         resource_request = RequestResource(flags=flags,
@@ -142,6 +91,12 @@ class ClientSideConnection(Connection):
         await self.send(resource_request)
 
     async def handle_data(self, packet):
+        previous_loss_event_rate = self.loss_event_rate_calculator.loss_event_rate
+        self.loss_event_rate_calculator.update(packet.sequence_number, packet.estimated_rtt)
+        if self.loss_event_rate_calculator.loss_event_rate > previous_loss_event_rate:
+            self.feedback_timer.expire()
+        # TODO: other conditions
+
         recent = packet.block_id <= self.offset if self.reverse else packet.block_id >= self.offset
         if recent:
             if packet.block_id not in self.decoders:
@@ -173,6 +128,10 @@ class ClientSideConnection(Connection):
         elif isinstance(packet, Error):
             await self.handle_error(packet)
 
+    def handle_feedback_timer_expired(self):
+        # RFC 5348 Section 6.2
+        pass
+
     async def send_stop(self, stop_at_block_id):
         """
         Called by the higher order protocol instance after receiving blocks from the opposing connection
@@ -186,6 +145,10 @@ class ClientSideConnection(Connection):
             if finished:
                 self.shutdown()
             await self.send(AckOppositeRange(stop_at_block_id=stop_at_block_id))
+
+    def shutdown(self):
+        super().shutdown()
+        self.feedback_timer.clear_listeners()
 
 
 class ServerSideConnection(Connection):
