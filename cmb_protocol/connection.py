@@ -84,7 +84,8 @@ class LossHistory:
                     self.loss_events[-1].loss_sequence_numbers.append(loss_sequence_number)
             del self.received_sequence_numbers[0]
             # RFC 5348 Section 5.3
-            self.loss_interval_sizes[-1] = after.sequence_number - self.loss_events[-1].loss_sequence_numbers[0] + 1
+            if len(self.loss_interval_sizes) > 1:
+                self.loss_interval_sizes[-1] = after.sequence_number - self.loss_events[-1].loss_sequence_numbers[0] + 1
 
 
 class ClientSideConnection(Connection):
