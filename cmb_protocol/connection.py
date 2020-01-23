@@ -49,43 +49,61 @@ class Connection(ABC):
 
 
 NDUPACK = 3
+NUMBER_OF_LOSS_INTERVALS = 8
 
 
-class LossHistory:
+class LossEventRateEstimator:
     Entry = namedtuple('Entry', ['timestamp', 'sequence_number'])
-    LossEvent = namedtuple('LossEvent', ['timestamp', 'loss_sequence_numbers'])
 
     def __init__(self):
         # initialize with -1 to be able to detect the packet with sequence number 0
-        self.received_sequence_numbers = [self.Entry(timestamp=Timestamp.now(), sequence_number=-1)]
-        self.loss_events = []
-        self.loss_interval_sizes = []
+        self._received_sequence_numbers = [self.Entry(timestamp=Timestamp.now(), sequence_number=-1)]
+        self._loss_events = []
+        self.loss_event_rate = 0
 
-    def detect_losses(self, sequence_number, rtt):
+    def update(self, sequence_number, rtt):
         def _dist(sequence_number1, sequence_number2):
             sequence_number_max = 2**24
             return (sequence_number1 + sequence_number_max - sequence_number2) % sequence_number_max
 
         # RFC 5348 Section 5.1
-        self.received_sequence_numbers.append(self.Entry(timestamp=Timestamp.now(), sequence_number=sequence_number))
-        self.received_sequence_numbers.sort(key=lambda x: x.sequence_number)
-        if len(self.received_sequence_numbers) == NDUPACK + 1:
-            before, after = self.received_sequence_numbers[:2]
+        self._received_sequence_numbers.append(self.Entry(timestamp=Timestamp.now(), sequence_number=sequence_number))
+        self._received_sequence_numbers.sort(key=lambda x: x.sequence_number)
+        if len(self._received_sequence_numbers) == NDUPACK + 1:
+            before, after = self._received_sequence_numbers[:2]
             # RFC 5348 Section 5.2
             for loss_sequence_number in range(before.sequence_number + 1, after.sequence_number):
                 loss_timestamp = before.timestamp + (after.timestamp - before.timestamp) * _dist(loss_sequence_number, before.sequence_numer) / _dist(after.sequence_numer, before.sequence_numer)
-                if len(self.loss_events) == 0 or self.loss_events[-1].timestamp + rtt < loss_timestamp:  # TODO: what happens if rtt is 0?
-                    self.loss_events.append(self.LossEvent(timestamp=loss_timestamp, loss_sequence_numbers=[loss_sequence_number]))
-                    # RFC 5348 Section 5.3
-                    self.loss_interval_sizes.append(1)
-                    if len(self.loss_interval_sizes) > 1:
-                        self.loss_interval_sizes[-2] = loss_sequence_number - self.loss_events[-2].loss_sequence_numbers[0]
-                else:
-                    self.loss_events[-1].loss_sequence_numbers.append(loss_sequence_number)
-            del self.received_sequence_numbers[0]
-            # RFC 5348 Section 5.3
-            if len(self.loss_interval_sizes) > 1:
-                self.loss_interval_sizes[-1] = after.sequence_number - self.loss_events[-1].loss_sequence_numbers[0] + 1
+                if len(self._loss_events) == 0 or self._loss_events[-1].timestamp + rtt < loss_timestamp:  # TODO: what happens if rtt is 0?
+                    # start new loss event, insert at index 0
+                    self._loss_events.insert(0, self.Entry(timestamp=loss_timestamp, sequence_number=loss_sequence_number))
+            del self._received_sequence_numbers[0]
+
+        if len(self._loss_events) > NUMBER_OF_LOSS_INTERVALS:
+            del self._loss_events[NUMBER_OF_LOSS_INTERVALS:]
+
+        if len(self._loss_events) == 0:
+            return
+
+        weights = [1 if i < NUMBER_OF_LOSS_INTERVALS / 2 else 2 * (NUMBER_OF_LOSS_INTERVALS - i) / (NUMBER_OF_LOSS_INTERVALS + 2) for i in range(0, len(self._loss_events))]
+        interval_sizes = [self._received_sequence_numbers[-1].sequence_number - self._loss_events[0].sequence_number + 1]
+        for i in range(1, len(self._loss_events)):
+            interval_sizes[i] = self._loss_events[i - 1].sequence_number - self._loss_events[i].sequence_number
+
+        I_tot0 = 0
+        I_tot1 = 0
+        W_tot = 0
+        for i in range(len(self._loss_events) - 1):
+            I_tot0 = I_tot0 + interval_sizes[i] * weights[i]
+            W_tot = W_tot + weights[i]
+
+        for i in range(1, len(self._loss_events)):
+            I_tot1 = I_tot1 + interval_sizes[i] * weights[i - 1]
+
+        I_tot = max(I_tot0, I_tot1)
+        I_mean = I_tot / W_tot
+
+        self.loss_event_rate = 1 / I_mean
 
 
 class ClientSideConnection(Connection):
