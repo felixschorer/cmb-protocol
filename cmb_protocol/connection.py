@@ -90,20 +90,20 @@ class LossEventRateEstimator:
         for i in range(1, len(self._loss_events)):
             interval_sizes[i] = self._loss_events[i - 1].sequence_number - self._loss_events[i].sequence_number
 
-        I_tot0 = 0
-        I_tot1 = 0
-        W_tot = 0
+        i_tot0 = 0
+        i_tot1 = 0
+        w_tot = 0
         for i in range(len(self._loss_events) - 1):
-            I_tot0 = I_tot0 + interval_sizes[i] * weights[i]
-            W_tot = W_tot + weights[i]
+            i_tot0 = i_tot0 + interval_sizes[i] * weights[i]
+            w_tot = w_tot + weights[i]
 
         for i in range(1, len(self._loss_events)):
-            I_tot1 = I_tot1 + interval_sizes[i] * weights[i - 1]
+            i_tot1 = i_tot1 + interval_sizes[i] * weights[i - 1]
 
-        I_tot = max(I_tot0, I_tot1)
-        I_mean = I_tot / W_tot
+        i_tot = max(i_tot0, i_tot1)
+        i_mean = i_tot / w_tot
 
-        self.loss_event_rate = 1 / I_mean
+        self.loss_event_rate = 1 / i_mean
 
 
 class ClientSideConnection(Connection):
