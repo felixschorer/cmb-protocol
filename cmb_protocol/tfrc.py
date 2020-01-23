@@ -52,7 +52,7 @@ class TFRCSender:
         self.allowed_sending_rate = segment_size  # X, in bytes per second
         self.initial_allowed_sending_rate = None
         self.time_last_doubled = 0  # tld, during slow-start, in seconds
-        self.rtt = None  # R
+        self.rtt = 0  # R
         self.rto = None
         # list of tuples with timestamp in seconds and estimated receive rate at the receiver
         self.recv_set = ReceiveRateSet()
@@ -104,7 +104,7 @@ class TFRCSender:
             # RFC 5348 Section 4.6, 8.2, and 8.3
             t_inter_packet_interval = self.segment_size / self.allowed_sending_rate
             t_delta = min(t_inter_packet_interval, SCHEDULING_GRANULARITY,
-                          self.rtt if self.rtt is not None else math.inf) / 2
+                          self.rtt if self.rtt != 0 else math.inf) / 2
             if Timestamp.now() > t - t_delta:
                 try:
                     await yield_((Timestamp.now(), self.rtt, sequence_number))
@@ -134,7 +134,7 @@ class TFRCSender:
                 self.recv_set = ReceiveRateSet(receive_rate=timer_limit / 2, timestamp=Timestamp.now())
                 self._update_allowed_sending_rate(receive_rate)
 
-            if self.rtt is None or self.loss_event_rate == 0:
+            if self.rtt == 0 or self.loss_event_rate == 0:
                 self.allowed_sending_rate = max(self.allowed_sending_rate / 2,
                                                 self.segment_size / MAXIMUM_BACKOFF_INTERVAL)
             # elif "sender has been idle ever since no_feedback_deadline was set" never happens in our case
@@ -148,7 +148,7 @@ class TFRCSender:
     def _update_rtt(self, timestamp, delay):  # timestamp in seconds, delay in seconds
         r_sample = Timestamp.now() - timestamp - delay
         q = 0.9
-        self.rtt = r_sample if self.rtt is None else q * self.rtt + (1 - q) * r_sample
+        self.rtt = r_sample if self.rtt == 0 else q * self.rtt + (1 - q) * r_sample
 
     def _update_allowed_sending_rate(self, receive_rate, previous_loss_event_rate=None):
         # RFC 5348 Section 4.3
