@@ -22,7 +22,6 @@ class LossEventRateCalculator:
         self.loss_event_rate = 0
 
     def update(self, sequence_number, rtt):
-
         # RFC 5348 Section 5.1
         self._received_sequence_numbers.append(self.Entry(timestamp=Timestamp.now(), sequence_number=sequence_number))
         self._received_sequence_numbers.sort(key=lambda x: x.sequence_number)
@@ -37,10 +36,10 @@ class LossEventRateCalculator:
                     self._loss_events.insert(0, self.Entry(timestamp=loss_timestamp, sequence_number=loss_sequence_number))
                     if len(self._loss_events) > NUMBER_OF_LOSS_INTERVALS:
                         del self._loss_events[NUMBER_OF_LOSS_INTERVALS:]
-                    self._recalculate()
+                    self.recalculate()
             del self._received_sequence_numbers[0]
 
-    def _recalculate(self):
+    def recalculate(self):
         if len(self._loss_events) == 0:
             return
 

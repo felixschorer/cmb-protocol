@@ -4,6 +4,7 @@ from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
     Error, ErrorCode, Packet, Feedback
+from cmb_protocol.sequencenumber import SequenceNumber
 from cmb_protocol.tfrc import TFRCSender, LossEventRateCalculator
 
 
@@ -80,8 +81,8 @@ class ClientSideConnection(Connection):
         self.feedback_timer.add_listener(self.handle_feedback_timer_expired)
 
         self.rtt = 0
-        self.timestamp = None
-        self.sequence_number = -1
+        self.last_received_timestamp = None
+        self.most_recent_sequence_number = SequenceNumber(-1)
 
     async def init_protocol(self):
         flags = RequestResourceFlags.REVERSE if self.reverse else RequestResourceFlags.NONE
@@ -91,6 +92,11 @@ class ClientSideConnection(Connection):
         await self.send(resource_request)
 
     async def handle_data(self, packet):
+        if packet.sequence_number > self.most_recent_sequence_number:
+            self.most_recent_sequence_number = packet.sequence_number
+            self.rtt = packet.estimated_rtt
+            self.last_received_timestamp = packet.timestamp
+
         previous_loss_event_rate = self.loss_event_rate_calculator.loss_event_rate
         self.loss_event_rate_calculator.update(packet.sequence_number, packet.estimated_rtt)
         if self.loss_event_rate_calculator.loss_event_rate > previous_loss_event_rate:
@@ -130,7 +136,7 @@ class ClientSideConnection(Connection):
 
     def handle_feedback_timer_expired(self):
         # RFC 5348 Section 6.2
-        pass
+        self.loss_event_rate_calculator.recalculate()
 
     async def send_stop(self, stop_at_block_id):
         """
