@@ -79,6 +79,12 @@ class LossEventRateEstimator:
                     self._loss_events.insert(0, self.Entry(timestamp=loss_timestamp, sequence_number=loss_sequence_number))
             del self._received_sequence_numbers[0]
 
+        # RFC 5348 Section 5.3
+        interval_sizes = [self._received_sequence_numbers[-1].sequence_number - self._loss_events[0].sequence_number + 1]
+        for i in range(1, len(self._loss_events)):
+            interval_sizes[i] = self._loss_events[i - 1].sequence_number - self._loss_events[i].sequence_number
+
+        # RFC 5348 Section 5.4
         if len(self._loss_events) > NUMBER_OF_LOSS_INTERVALS:
             del self._loss_events[NUMBER_OF_LOSS_INTERVALS:]
 
@@ -86,9 +92,6 @@ class LossEventRateEstimator:
             return
 
         weights = [1 if i < NUMBER_OF_LOSS_INTERVALS / 2 else 2 * (NUMBER_OF_LOSS_INTERVALS - i) / (NUMBER_OF_LOSS_INTERVALS + 2) for i in range(0, len(self._loss_events))]
-        interval_sizes = [self._received_sequence_numbers[-1].sequence_number - self._loss_events[0].sequence_number + 1]
-        for i in range(1, len(self._loss_events)):
-            interval_sizes[i] = self._loss_events[i - 1].sequence_number - self._loss_events[i].sequence_number
 
         i_tot0 = 0
         i_tot1 = 0
