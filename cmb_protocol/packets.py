@@ -108,13 +108,14 @@ class Data(Packet):
         super().__init__()
         self.block_id = block_id
         self.fec_data = fec_data
+        assert isinstance(timestamp, Timestamp)
         self.timestamp = timestamp
         self.estimated_rtt = estimated_rtt
         self.sequence_number = sequence_number
 
     def _serialize_fields(self):
         values = pack_uint48(self.block_id), \
-                 pack_uint24(self.timestamp), \
+                 self.timestamp.to_bytes(), \
                  self.estimated_rtt, \
                  pack_uint24(self.sequence_number)
         return struct.pack(self.__format, *values) + self.fec_data
@@ -124,7 +125,7 @@ class Data(Packet):
         header, fec_data = packet_bytes[:cls.HEADER_SIZE], packet_bytes[cls.HEADER_SIZE:]
         block_id, timestamp, estimated_rtt, sequence_number = struct.unpack(cls.__format, header)
         return Data(block_id=unpack_uint48(block_id),
-                    timestamp=unpack_uint24(timestamp),
+                    timestamp=Timestamp.from_bytes(timestamp),
                     estimated_rtt=estimated_rtt,
                     sequence_number=unpack_uint24(sequence_number),
                     fec_data=fec_data)
