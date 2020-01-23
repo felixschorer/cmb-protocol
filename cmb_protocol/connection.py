@@ -46,6 +46,24 @@ class Connection(ABC):
         await self._send(packet)
 
 
+NDUPACK = 3
+
+
+class LossHistory:
+    def __init__(self):
+        self.received_sequence_numbers = [-1]
+        self.losses = []
+
+    def detect_losses(self, sequence_number):
+        self.received_sequence_numbers.append(sequence_number)
+        self.received_sequence_numbers.sort()
+        if len(self.received_sequence_numbers) == NDUPACK + 1:
+            losses = list(range(self.received_sequence_numbers[0] + 1, self.received_sequence_numbers[1]))
+            del self.received_sequence_numbers[0]
+            self.losses.append(losses)
+            return losses
+
+
 class ClientSideConnection(Connection):
     def __init__(self, shutdown, spawn, send, write_blocks, resource_id, reverse):
         """
