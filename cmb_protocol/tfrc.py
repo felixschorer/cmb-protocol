@@ -72,7 +72,9 @@ class LossEventRateCalculator:
 class ReceiveRateSet:
     Entry = namedtuple('RecvSetEntry', ['timestamp', 'receive_rate'])
 
-    def __init__(self, receive_rate=math.inf, timestamp=0):
+    def __init__(self, receive_rate=math.inf, timestamp=None):
+        if timestamp is None:
+            timestamp = Timestamp.now()
         self._entries = [self.Entry(timestamp=timestamp, receive_rate=receive_rate)]
 
     def halve(self):
@@ -113,7 +115,7 @@ class TFRCSender:
         self.segment_size = segment_size
         self.allowed_sending_rate = segment_size  # X, in bytes per second
         self.initial_allowed_sending_rate = None
-        self.time_last_doubled = 0  # tld, during slow-start, in seconds
+        self.time_last_doubled = Timestamp.now()  # tld, during slow-start, in seconds
         self.rtt = 0  # R
         self.rto = None
         # list of tuples with timestamp in seconds and estimated receive rate at the receiver
@@ -121,7 +123,7 @@ class TFRCSender:
         self.loss_event_rate = 0  # p
         self.tcp_sending_rate = None  # X_bps
         # data-limited interval
-        self.not_limited1 = self.not_limited2 = self.t_new = self.t_next = 0
+        self.not_limited1 = self.not_limited2 = self.t_new = self.t_next = Timestamp.now()
         self.data_limited = False
 
         self.no_feedback_deadline = Timestamp.now() + 2
@@ -134,7 +136,7 @@ class TFRCSender:
         previous_loss_event_rate, self.loss_event_rate = self.loss_event_rate, loss_event_rate
         self.rto = max(4 * self.rtt, 2 * self.segment_size / self.allowed_sending_rate)
 
-        if previous_rtt is None:
+        if previous_rtt == 0:
             # RFC 5348 Section 4.2
             w_init = min(4 * self.segment_size, max(2 * self.segment_size, 4380))
             self.initial_allowed_sending_rate = self.allowed_sending_rate = w_init / self.rtt

@@ -42,7 +42,7 @@ class Timer:
     def expire(self):
         self.clear()
         for listener in self._listeners:
-            listener()
+            listener(True)
 
     def _stop_waiter(self):
         if self._cancel_scope is not None:
@@ -69,7 +69,7 @@ class Timer:
             self._cancel_scope = None
             self._deadline = None
             for listener in self._listeners:
-                listener()
+                listener(False)
 
 
 async def spawn_child_nursery(spawn, shutdown_timeout=math.inf):

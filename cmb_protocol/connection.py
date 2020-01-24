@@ -1,4 +1,5 @@
 from abc import ABC
+from collections import namedtuple
 
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size
@@ -51,6 +52,8 @@ class Connection(ABC):
 
 
 class ClientSideConnection(Connection):
+    PacketMeta = namedtuple('PacketMeta', ['rtt', 'timestamp', 'sequence_number', 'received_at'])
+
     def __init__(self, shutdown, spawn, send, write_blocks, resource_id, reverse):
         """
         :param shutdown:     cf. Connection
@@ -79,10 +82,9 @@ class ClientSideConnection(Connection):
         self.loss_event_rate_calculator = LossEventRateCalculator()
         self.feedback_timer = Timer(self.spawn)
         self.feedback_timer.add_listener(self.handle_feedback_timer_expired)
-
-        self.rtt = 0
-        self.last_received_timestamp = None
-        self.most_recent_sequence_number = SequenceNumber(-1)
+        self.sender_params = None
+        self.packet_count = 0
+        self.feedback_timer_last_expired = None
 
     async def init_protocol(self):
         flags = RequestResourceFlags.REVERSE if self.reverse else RequestResourceFlags.NONE
@@ -92,10 +94,25 @@ class ClientSideConnection(Connection):
         await self.send(resource_request)
 
     async def handle_data(self, packet):
-        if packet.sequence_number > self.most_recent_sequence_number:
-            self.most_recent_sequence_number = packet.sequence_number
-            self.rtt = packet.estimated_rtt
-            self.last_received_timestamp = packet.timestamp
+        if self.sender_params is None:
+            # first data packet
+            await self.send(Feedback(delay=0, timestamp=packet.timestamp, receive_rate=0, loss_event_rate=0))
+        elif self.sender_params.rtt == 0:
+            # feedback timer has not been set yet
+            if packet.estimated_rtt != 0:
+                self.feedback_timer.reset(packet.estimated_rtt)
+
+            receive_rate = SEGMENT_SIZE / (Timestamp.now() - self.sender_params.received_at)
+            await self.send(Feedback(delay=0, timestamp=packet.timestamp, receive_rate=receive_rate,
+                                     loss_event_rate=self.loss_event_rate_calculator.loss_event_rate))
+
+        self.packet_count += 1
+        if self.feedback_timer_last_expired is None:
+            self.feedback_timer_last_expired = Timestamp.now()
+
+        if self.sender_params is None or packet.sequence_number > self.sender_params.sequence_number:
+            self.sender_params = self.PacketMeta(rtt=packet.estimated_rtt, timestamp=packet.timestamp,
+                                                 sequence_number=packet.sequence_number, received_at=Timestamp.now())
 
         previous_loss_event_rate = self.loss_event_rate_calculator.loss_event_rate
         self.loss_event_rate_calculator.update(packet.sequence_number, packet.estimated_rtt)
@@ -134,9 +151,21 @@ class ClientSideConnection(Connection):
         elif isinstance(packet, Error):
             await self.handle_error(packet)
 
-    def handle_feedback_timer_expired(self):
+    def handle_feedback_timer_expired(self, expired_early):
         # RFC 5348 Section 6.2
         self.loss_event_rate_calculator.recalculate()
+        receive_rate = self.packet_count * SEGMENT_SIZE / (Timestamp.now() - self.feedback_timer_last_expired)
+
+        if not expired_early:
+            self.packet_count = 0
+
+        self.spawn(self.send_feedback, receive_rate, self.sender_params)
+        self.feedback_timer.reset(self.sender_params.rtt)
+
+    async def send_feedback(self, receive_rate, sender_params):
+        delay = Timestamp.now() - sender_params.received_at
+        await self.send(Feedback(delay=delay, timestamp=sender_params.timestamp, receive_rate=receive_rate,
+                                 loss_event_rate=self.loss_event_rate_calculator.loss_event_rate))
 
     async def send_stop(self, stop_at_block_id):
         """

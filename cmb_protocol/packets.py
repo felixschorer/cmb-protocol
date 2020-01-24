@@ -118,7 +118,7 @@ class Data(Packet):
     def _serialize_fields(self):
         values = pack_uint48(self.block_id), \
                  self.timestamp.to_bytes(), \
-                 self.estimated_rtt, \
+                 int(self.estimated_rtt * 1000), \
                  self.sequence_number.to_bytes()
         return struct.pack(self.__format, *values) + self.fec_data
 
@@ -128,7 +128,7 @@ class Data(Packet):
         block_id, timestamp, estimated_rtt, sequence_number = struct.unpack(cls.__format, header)
         return Data(block_id=unpack_uint48(block_id),
                     timestamp=Timestamp.from_bytes(timestamp),
-                    estimated_rtt=estimated_rtt,
+                    estimated_rtt=estimated_rtt / 1000,
                     sequence_number=SequenceNumber.from_bytes(sequence_number),
                     fec_data=fec_data)
 
@@ -239,7 +239,7 @@ class Feedback(Packet):
         values = int(self.delay * 1000), \
                  self.timestamp.to_bytes(), \
                  bytes(1), \
-                 self.receive_rate, \
+                 int(self.receive_rate), \
                  self.loss_event_rate
         return struct.pack(self.__format, *values)
 

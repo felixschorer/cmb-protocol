@@ -95,5 +95,5 @@ def run(file_reader, addresses):
     resource_id = (resource_hash, resource_length)
     packed_resource_id = struct.pack(RESOURCE_ID_STRUCT_FORMAT, *resource_id).hex()
 
-    logger.debug('Serving resource %s', packed_resource_id)
+    logger.info('Serving resource %s', packed_resource_id)
     trio.run(serve, addresses, resource_id, encoders)
