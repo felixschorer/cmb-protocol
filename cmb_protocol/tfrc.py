@@ -51,7 +51,7 @@ class LossEventRateCalculator:
             # RFC 5348 Section 5.2
             for loss_sequence_number in range(before.sequence_number.value + 1, after.sequence_number.value):
                 loss_sequence_number = SequenceNumber(loss_sequence_number)
-                loss_timestamp = before.timestamp + (after.timestamp - before.timestamp) * (loss_sequence_number - before.sequence_numer) / (after.sequence_numer - before.sequence_numer)
+                loss_timestamp = before.timestamp + (after.timestamp - before.timestamp) * (loss_sequence_number - before.sequence_number) / (after.sequence_number - before.sequence_number)
                 if len(self._loss_events) == 0 or self._loss_events[-1].timestamp + rtt < loss_timestamp:  # TODO: what happens if rtt is 0?
                     # start new loss event, insert at index 0
                     self._loss_events.insert(0, self.Entry(timestamp=loss_timestamp, sequence_number=loss_sequence_number))
