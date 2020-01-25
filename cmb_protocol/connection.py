@@ -153,13 +153,13 @@ class ClientSideConnection(Connection):
 
     def handle_feedback_timer_expired(self, expired_early):
         # RFC 5348 Section 6.2
-        self.loss_event_rate_calculator.recalculate()
-        receive_rate = self.packet_count * SEGMENT_SIZE / (Timestamp.now() - self.feedback_timer_last_expired)
+        if self.packet_count != 0:
+            self.loss_event_rate_calculator.recalculate()
+            receive_rate = self.packet_count * SEGMENT_SIZE / (Timestamp.now() - self.feedback_timer_last_expired)
+            self.spawn(self.send_feedback, receive_rate, self.sender_params)
+            if not expired_early:
+                self.packet_count = 0
 
-        if not expired_early:
-            self.packet_count = 0
-
-        self.spawn(self.send_feedback, receive_rate, self.sender_params)
         self.feedback_timer.reset(self.sender_params.rtt)
 
     async def send_feedback(self, receive_rate, sender_params):
