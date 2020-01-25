@@ -277,6 +277,7 @@ class TFRCSender:
     async def sending_credits(self):
         sequence_number = SequenceNumber(0)
         t = Timestamp.now()
+        sent_in_previous_iteration = False
         while True:
             self._check_no_feedback_timer_expired()
 
@@ -285,22 +286,22 @@ class TFRCSender:
             t_delta = min(t_inter_packet_interval, SCHEDULING_GRANULARITY,
                           self._rtt if self._rtt != 0 else math.inf) / 2
             if Timestamp.now() > t - t_delta:
-                try:
-                    await yield_((Timestamp.now(), self._rtt, sequence_number))
-                    sequence_number += 1
-                    t += t_inter_packet_interval  # set t_(i+1)
-                except StopIteration:
-                    return
+                await yield_((Timestamp.now(), self._rtt, sequence_number))
+                sequence_number += 1
+                t += t_inter_packet_interval  # set t_(i+1)
+                sent_in_previous_iteration = True
             else:
-                # sender is not data-limited at this instant
-                if self._not_limited1 <= self._t_new:
-                    # goal: self.not_limited1 > self.t_new
-                    self._not_limited1 = self._t_new
-                elif self._not_limited2 <= self._t_next:
-                    # goal: self.not_limited2 > self.t_next
-                    self._not_limited2 = Timestamp.now()
+                if sent_in_previous_iteration:
+                    # sender is not data-limited at this instant
+                    if self._not_limited1 <= self._t_new:
+                        # goal: self.not_limited1 > self.t_new
+                        self._not_limited1 = self._t_new
+                    elif self._not_limited2 <= self._t_next:
+                        # goal: self.not_limited2 > self.t_next
+                        self._not_limited2 = Timestamp.now()
 
                 await trio.sleep(SCHEDULING_GRANULARITY)
+                sent_in_previous_iteration = False
 
     def _check_no_feedback_timer_expired(self):
         while self._no_feedback_deadline <= Timestamp.now():
