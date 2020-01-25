@@ -52,8 +52,6 @@ async def run_accept_loop(udp_sock, resource_id, encoders):
             except ValueError as exc:
                 logger.exception(exc)
             else:
-                logger.debug('Received %s', packet)
-
                 if address not in connections:
                     if not isinstance(packet, RequestResource):
                         continue

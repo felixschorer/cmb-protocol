@@ -1,17 +1,15 @@
 from abc import ABC
-from collections import namedtuple
 
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
     Error, ErrorCode, Packet, Feedback
-from cmb_protocol.sequencenumber import SequenceNumber
-from cmb_protocol.tfrc import TFRCSender, LossEventRateCalculator, TFRCReceiver
+from cmb_protocol.tfrc import TFRCSender, TFRCReceiver
 
-# called s in TFRC, in bytes
-from cmb_protocol.timestamp import Timestamp
 from cmb_protocol.trio_util import Timer
 
+
+# called s in TFRC, in bytes
 SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + Data.HEADER_SIZE + RAPTORQ_HEADER_SIZE + MAXIMUM_TRANSMISSION_UNIT
 
 

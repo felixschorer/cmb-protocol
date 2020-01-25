@@ -53,8 +53,6 @@ async def run_receive_loop(connection_opened, connection_closed, write_blocks, s
                 except ValueError as exc:
                     logger.exception(exc)
                 else:
-                    logger.debug('Received %s', packet)
-
                     await connection.handle_packet(packet)
 
 

@@ -4,10 +4,12 @@ from collections import namedtuple
 import trio
 from async_generator import async_generator, yield_
 
-from cmb_protocol.packets import Feedback
+from cmb_protocol import log_util
 from cmb_protocol.sequencenumber import SequenceNumber
 from cmb_protocol.timestamp import Timestamp
-from cmb_protocol.trio_util import Timer
+
+
+logger = log_util.get_logger(__name__)
 
 NDUPACK = 3
 NUMBER_OF_LOSS_INTERVALS = 8
@@ -52,12 +54,13 @@ class LossEventRateCalculator:
             for loss_sequence_number in range(before.sequence_number.value + 1, after.sequence_number.value):
                 loss_sequence_number = SequenceNumber(loss_sequence_number)
                 loss_timestamp = before.timestamp + (after.timestamp - before.timestamp) * (loss_sequence_number - before.sequence_number) / (after.sequence_number - before.sequence_number)
-                if len(self._loss_events) == 0 or self._loss_events[-1].timestamp + rtt < loss_timestamp:  # TODO: what happens if rtt is 0?
+                if len(self._loss_events) == 0 or self._loss_events[0].timestamp + rtt < loss_timestamp:  # TODO: what happens if rtt is 0?
                     # start new loss event, insert at index 0
                     self._loss_events.insert(0, self.Entry(timestamp=loss_timestamp, sequence_number=loss_sequence_number))
                     if len(self._loss_events) > NUMBER_OF_LOSS_INTERVALS:
                         del self._loss_events[NUMBER_OF_LOSS_INTERVALS:]
                     self.recalculate()
+                    logger.debug('Detected new loss event, updated loss event rate: %f', self.loss_event_rate)
             del self._received_sequence_numbers[0]
 
     def recalculate(self):
@@ -274,6 +277,8 @@ class TFRCSender:
 
     def _check_no_feedback_timer_expired(self):
         while self.no_feedback_deadline <= Timestamp.now():
+            logger.debug('No-feedback timer expired')
+
             # RFC 5348 Section 4.4
             receive_rate = self.recv_set.max_receive_rate
 
@@ -325,3 +330,5 @@ class TFRCSender:
             self.allowed_sending_rate = max(min(2 * self.allowed_sending_rate, recv_limit),
                                             self.initial_allowed_sending_rate)
             self.time_last_doubled = Timestamp.now()
+
+        logger.debug('Updated allowed sending rate: %f bps', self.allowed_sending_rate)
