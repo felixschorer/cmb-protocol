@@ -74,7 +74,7 @@ class ClientSideConnection(Connection):
         self.spawn(self.init_protocol)
 
         self.tfrc = TFRCReceiver(SEGMENT_SIZE, Timer(self.spawn))
-        self.tfrc.on_send_feedback += self.send_feedback
+        self.tfrc.feedback_handler += self.send_feedback
 
     async def init_protocol(self):
         flags = RequestResourceFlags.REVERSE if self.reverse else RequestResourceFlags.NONE
@@ -223,3 +223,7 @@ class ServerSideConnection(Connection):
             await self.handle_ack_opposite_range(packet)
         elif isinstance(packet, Feedback):
             await self.handle_feedback(packet)
+
+    def shutdown(self):
+        super().shutdown()
+        self.tfrc.close()
