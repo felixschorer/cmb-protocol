@@ -8,7 +8,6 @@ from cmb_protocol import log_util
 from cmb_protocol.sequencenumber import SequenceNumber
 from cmb_protocol.timestamp import Timestamp
 
-
 logger = log_util.get_logger(__name__)
 
 NDUPACK = 3
@@ -78,7 +77,7 @@ class TFRCReceiver:
             self.feedback_handler.trigger(delay=0, timestamp=timestamp, receive_rate=0, loss_event_rate=0)
         else:
             previous_loss_event_rate = self._loss_event_rate
-            self._update_loss_history(sequence_number, rtt)
+            self._update_loss_history(sequence_number)
             if self._loss_event_rate > previous_loss_event_rate or not self._sent_feedback:
                 self._feedback_timer.expire()
 
@@ -91,27 +90,54 @@ class TFRCReceiver:
             # RFC 5348 Section 5.2
             for loss_sequence_number in range(before.sequence_number.value + 1, after.sequence_number.value):
                 loss_sequence_number = SequenceNumber(loss_sequence_number)
-                loss_timestamp = before.timestamp + (after.timestamp - before.timestamp) * (loss_sequence_number - before.sequence_number) / (after.sequence_number - before.sequence_number)
-                if len(self._loss_events) == 0 or self._loss_events[0].timestamp + self._rtt < loss_timestamp:  # TODO: what happens if rtt is 0?
+                loss_timestamp = before.timestamp + (after.timestamp - before.timestamp) * (
+                        loss_sequence_number - before.sequence_number) / (
+                                         after.sequence_number - before.sequence_number)
+                if len(self._loss_events) == 0 or self._loss_events[
+                    0].timestamp + self._rtt < loss_timestamp:  # TODO: what happens if rtt is 0?
                     # start new loss event, insert at index 0
-                    self._loss_events.insert(0, self.Entry(timestamp=loss_timestamp, sequence_number=loss_sequence_number))
+                    self._loss_events.insert(0,
+                                             self.Entry(timestamp=loss_timestamp, sequence_number=loss_sequence_number))
                     if len(self._loss_events) > NUMBER_OF_LOSS_INTERVALS:
                         del self._loss_events[NUMBER_OF_LOSS_INTERVALS:]
                     self._recalculate_loss_event_rate()
                     logger.debug('Detected new loss event, updated loss event rate: %f', self._loss_event_rate)
             del self._received_sequence_numbers[0]
 
+    def _approximate_loss_event_rate(self):
+        start = 0
+        end = 1
+        estimated_loss_event_rate = 0
+        for _ in range(100):
+            estimated_loss_event_rate = start + (end - start) / 2
+            estimated_receive_rate = self._segment_size / (self._rtt * (
+                    math.sqrt(2 * estimated_loss_event_rate / 3) + 12 * math.sqrt(
+                3 * estimated_loss_event_rate / 8) * estimated_loss_event_rate * (
+                            1 + 32 * estimated_loss_event_rate ** 2)))
+
+            error = (self._max_receive_rate - estimated_receive_rate) / self._max_receive_rate
+            if error > 0.05:
+                end = estimated_loss_event_rate
+            elif error < -0.05:
+                start = estimated_loss_event_rate
+            else:
+                break
+        return estimated_loss_event_rate
+
     def _recalculate_loss_event_rate(self):
-        if len(self._loss_events) < 2:
-            pass
-        else:
+        if len(self._loss_events) == 1:
+            # RFC 5348 Section 6.3.1
+            self._loss_event_rate = self._approximate_loss_event_rate()
+        elif len(self._loss_events) > 1:
             # RFC 5348 Section 5.3
-            interval_sizes = [self._received_sequence_numbers[-1].sequence_number - self._loss_events[0].sequence_number + 1]
+            interval_sizes = [
+                self._received_sequence_numbers[-1].sequence_number - self._loss_events[0].sequence_number + 1]
             for i in range(1, len(self._loss_events)):
-                interval_sizes[i] = self._loss_events[i - 1].sequence_number - self._loss_events[i].sequence_number
+                interval_sizes.append(self._loss_events[i - 1].sequence_number - self._loss_events[i].sequence_number)
 
             # RFC 5348 Section 5.4
-            weights = [1 if i < NUMBER_OF_LOSS_INTERVALS / 2 else 2 * (NUMBER_OF_LOSS_INTERVALS - i) / (NUMBER_OF_LOSS_INTERVALS + 2) for i in range(0, len(self._loss_events))]
+            weights = [1 if i < NUMBER_OF_LOSS_INTERVALS / 2 else 2 * (NUMBER_OF_LOSS_INTERVALS - i) / (
+                    NUMBER_OF_LOSS_INTERVALS + 2) for i in range(0, len(self._loss_events))]
 
             i_tot0 = 0
             i_tot1 = 0
@@ -133,7 +159,8 @@ class TFRCReceiver:
     def _handle_feedback_timer_expired(self, expired_early):
         # RFC 5348 Section 6.2
         if self._packet_count != 0:
-            receive_rate = self._packet_count * self._segment_size / (Timestamp.now() - self._feedback_timer_last_expired)
+            receive_rate = self._packet_count * self._segment_size / (
+                    Timestamp.now() - self._feedback_timer_last_expired)
             self._max_receive_rate = max(receive_rate, self._max_receive_rate)
             self._recalculate_loss_event_rate()
 
@@ -165,7 +192,7 @@ class ReceiveRateSet:
         self._entries = [self.Entry(timestamp=timestamp, receive_rate=receive_rate)]
 
     def halve(self):
-        self._entries = [(timestamp, recv / 2) for timestamp, recv in self._entries]
+        self._entries = [self.Entry(timestamp=timestamp, receive_rate=recv / 2) for timestamp, recv in self._entries]
 
     def maximize(self, receive_rate):
         self._append(self.Entry(timestamp=Timestamp.now(), receive_rate=receive_rate))
@@ -239,7 +266,8 @@ class TFRCSender:
         self._t_new = timestamp
         t_old = self._t_new - self._rtt
         self._t_next = Timestamp.now()
-        self._data_limited = not (t_old < self._not_limited1 <= self._t_new or t_old < self._not_limited2 <= self._t_new)
+        self._data_limited = not (
+                t_old < self._not_limited1 <= self._t_new or t_old < self._not_limited2 <= self._t_new)
 
         if self._not_limited1 <= self._t_new < self._not_limited2:
             self._not_limited1 = self._not_limited2
@@ -290,6 +318,7 @@ class TFRCSender:
             if self._rtt == 0 or self._loss_event_rate == 0:
                 self._allowed_sending_rate = max(self._allowed_sending_rate / 2,
                                                  self._segment_size / MAXIMUM_BACKOFF_INTERVAL)
+                logger.debug('Updated allowed sending rate: %f bps', self._allowed_sending_rate)
             # elif "sender has been idle ever since no_feedback_deadline was set" never happens in our case
             elif self._tcp_sending_rate > 2 * receive_rate:
                 update_limits(receive_rate)
@@ -297,7 +326,7 @@ class TFRCSender:
                 update_limits(self._tcp_sending_rate / 2)
 
             self._no_feedback_deadline += max(4 * self._rtt, 2 * self._segment_size / self._allowed_sending_rate)
-    
+
     def _update_rtt(self, timestamp, delay):  # timestamp in seconds, delay in seconds
         r_sample = Timestamp.now() - timestamp - delay
         q = 0.9
@@ -322,8 +351,10 @@ class TFRCSender:
             recv_limit = 2 * self._recv_set.max_receive_rate
 
         if self._loss_event_rate > 0:
-            self._tcp_sending_rate = self._segment_size / (self._rtt * math.sqrt(2 * self._loss_event_rate / 3) + (self._rto * (
-                    3 * math.sqrt(3 * self._loss_event_rate / 8) * self._loss_event_rate * (1 + 32 * self._loss_event_rate ** 2))))
+            self._tcp_sending_rate = self._segment_size / (
+                    self._rtt * math.sqrt(2 * self._loss_event_rate / 3) + (self._rto * (
+                    3 * math.sqrt(3 * self._loss_event_rate / 8) * self._loss_event_rate * (
+                    1 + 32 * self._loss_event_rate ** 2))))
             self._allowed_sending_rate = max(min(self._tcp_sending_rate, recv_limit),
                                              self._segment_size / MAXIMUM_BACKOFF_INTERVAL)
         elif Timestamp.now() - self._time_last_doubled >= self._rtt:
