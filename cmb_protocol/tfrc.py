@@ -19,9 +19,11 @@ class Event:
 
     def __iadd__(self, other):
         self.listeners.add(other)
+        return self
 
     def __isub__(self, other):
         self.listeners.remove(other)
+        return self
 
     def clear(self):
         self.listeners.clear()
