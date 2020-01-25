@@ -28,7 +28,7 @@ def parse_args():
 
     main_parser = ArgumentParser()
 
-    subparsers = main_parser.add_subparsers(dest=MODE, required=True)
+    subparsers = main_parser.add_subparsers(dest=MODE)
 
     client_parser = subparsers.add_parser(CLIENT, parents=[address_parser, loglevel_parser])
     client_parser.add_argument(RESOURCE_ID, type=str)

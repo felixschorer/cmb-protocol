@@ -1,8 +1,8 @@
 import struct
 from abc import ABCMeta, ABC, abstractmethod
-from enum import unique, Enum, IntFlag, IntEnum
+from enum import unique, Enum, IntEnum
 
-from cmb_protocol.helpers import unpack_uint48, pack_uint48, pack_uint24, unpack_uint24
+from cmb_protocol.helpers import unpack_uint48, pack_uint48
 from cmb_protocol.sequencenumber import SequenceNumber
 from cmb_protocol.timestamp import Timestamp
 
@@ -65,7 +65,7 @@ class Packet(ABC, metaclass=_PacketMeta):
 
 
 @unique
-class RequestResourceFlags(IntFlag):
+class RequestResourceFlags(IntEnum):
     NONE = 0
     REVERSE = 1
 
@@ -79,7 +79,6 @@ class RequestResource(Packet):
 
     def __init__(self, flags, resource_id, block_offset):
         super().__init__()
-        assert isinstance(flags, RequestResourceFlags)
         self.flags = flags
         self.resource_id = resource_id
         self.block_offset = block_offset
@@ -92,7 +91,7 @@ class RequestResource(Packet):
     @classmethod
     def _parse_fields(cls, packet_bytes):
         flags, reserved, resource_hash, resource_length, block_offset = struct.unpack(cls.__format, packet_bytes)
-        return RequestResource(flags=RequestResourceFlags(flags),
+        return RequestResource(flags=flags,
                                resource_id=(resource_hash, resource_length),
                                block_offset=block_offset)
 

@@ -214,7 +214,7 @@ class ServerSideConnection(Connection):
             await self.send(Error(ErrorCode.RESOURCE_NOT_FOUND))
             self.shutdown()
         elif not self.connected:
-            self.reverse = packet.flags is RequestResourceFlags.REVERSE
+            self.reverse = bool(packet.flags & RequestResourceFlags.REVERSE)
             self.connected = True
             self.stop_at_block_id = -1 if self.reverse else len(self.encoders)
             self.spawn(self.send_blocks)
