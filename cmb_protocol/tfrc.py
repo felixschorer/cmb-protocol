@@ -4,12 +4,31 @@ from collections import namedtuple
 import trio
 from async_generator import async_generator, yield_
 
+from cmb_protocol.packets import Feedback
 from cmb_protocol.sequencenumber import SequenceNumber
 from cmb_protocol.timestamp import Timestamp
-
+from cmb_protocol.trio_util import Timer
 
 NDUPACK = 3
 NUMBER_OF_LOSS_INTERVALS = 8
+
+
+class Event:
+    def __init__(self):
+        self.listeners = set()
+
+    def __iadd__(self, other):
+        self.listeners.add(other)
+
+    def __isub__(self, other):
+        self.listeners.remove(other)
+
+    def clear(self):
+        self.listeners.clear()
+
+    def trigger(self, *args, **kwargs):
+        for listener in self.listeners:
+            listener(*args, **kwargs)
 
 
 class LossEventRateCalculator:
@@ -67,6 +86,70 @@ class LossEventRateCalculator:
         self.loss_event_rate = 1 / i_mean
 
         # TODO (OPTIONAL): RFC 5348 Section 5.5
+
+
+class TFRCReceiver:
+    PacketMeta = namedtuple('PacketMeta', ['rtt', 'timestamp', 'sequence_number', 'received_at'])
+
+    def __init__(self, segment_size, feedback_timer):
+        self.segment_size = segment_size
+        self.on_send_feedback = Event()
+        self.loss_event_rate_calculator = LossEventRateCalculator()
+        self.feedback_timer = feedback_timer
+        self.feedback_timer.add_listener(self.handle_feedback_timer_expired)
+        self.sender_params = None
+        self.packet_count = 0
+        self.feedback_timer_last_expired = None
+        self.sent_feedback = False
+
+    def handle_data(self, timestamp, rtt, sequence_number):
+        if self.sender_params is None:
+            # first data packet
+            self.on_send_feedback.trigger(delay=0, timestamp=timestamp, receive_rate=0, loss_event_rate=0)
+        elif self.sender_params.rtt == 0:
+            # feedback timer has not been set yet
+            if rtt != 0:
+                self.feedback_timer.reset(rtt)
+
+            receive_rate = self.segment_size / (Timestamp.now() - self.sender_params.received_at)
+            self.on_send_feedback.trigger(delay=0, timestamp=timestamp, receive_rate=receive_rate,
+                                          loss_event_rate=self.loss_event_rate_calculator.loss_event_rate)
+
+        self.packet_count += 1
+        if self.feedback_timer_last_expired is None:
+            self.feedback_timer_last_expired = Timestamp.now()
+
+        if self.sender_params is None or sequence_number > self.sender_params.sequence_number:
+            self.sender_params = self.PacketMeta(rtt=rtt, timestamp=timestamp,
+                                                 sequence_number=sequence_number, received_at=Timestamp.now())
+
+        previous_loss_event_rate = self.loss_event_rate_calculator.loss_event_rate
+        self.loss_event_rate_calculator.update(sequence_number, rtt)
+        if self.loss_event_rate_calculator.loss_event_rate > previous_loss_event_rate or not self.sent_feedback:
+            self.feedback_timer.expire()
+
+    def handle_feedback_timer_expired(self, expired_early):
+        # RFC 5348 Section 6.2
+        if self.packet_count != 0:
+            self.loss_event_rate_calculator.recalculate()
+            receive_rate = self.packet_count * self.segment_size / (Timestamp.now() - self.feedback_timer_last_expired)
+
+            delay = Timestamp.now() - self.sender_params.received_at
+            self.on_send_feedback.trigger(delay=delay, timestamp=self.sender_params.timestamp,
+                                          receive_rate=receive_rate,
+                                          loss_event_rate=self.loss_event_rate_calculator.loss_event_rate)
+            self.sent_feedback = True
+
+            if not expired_early:
+                self.packet_count = 0
+        else:
+            self.sent_feedback = False
+
+        self.feedback_timer.reset(self.sender_params.rtt)
+
+    def close(self):
+        self.feedback_timer.clear_listeners()
+        self.on_send_feedback.clear()
 
 
 class ReceiveRateSet:
