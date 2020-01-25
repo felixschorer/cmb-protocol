@@ -93,7 +93,7 @@ class ClientSideConnection(Connection):
                 await self.send(resource_request)
                 await trio.sleep(1)
 
-    def handle_connection_timeout(self):
+    def handle_connection_timeout(self, expired_early):
         self.spawn(self.establish_connection)
 
     async def handle_data(self, packet):

@@ -35,94 +35,32 @@ class Event:
             listener(*args, **kwargs)
 
 
-class LossEventRateCalculator:
-    Entry = namedtuple('Entry', ['timestamp', 'sequence_number'])
-
-    def __init__(self):
-        # initialize with -1 to be able to detect the packet with sequence number 0
-        self._received_sequence_numbers = [self.Entry(timestamp=Timestamp.now(), sequence_number=SequenceNumber(-1))]
-        self._loss_events = []
-        self.loss_event_rate = 0
-
-    def update(self, sequence_number, rtt):
-        # RFC 5348 Section 5.1
-        self._received_sequence_numbers.append(self.Entry(timestamp=Timestamp.now(), sequence_number=sequence_number))
-        self._received_sequence_numbers.sort(key=lambda x: x.sequence_number)
-        if len(self._received_sequence_numbers) == NDUPACK + 1:
-            before, after = self._received_sequence_numbers[:2]
-            # RFC 5348 Section 5.2
-            for loss_sequence_number in range(before.sequence_number.value + 1, after.sequence_number.value):
-                loss_sequence_number = SequenceNumber(loss_sequence_number)
-                loss_timestamp = before.timestamp + (after.timestamp - before.timestamp) * (loss_sequence_number - before.sequence_number) / (after.sequence_number - before.sequence_number)
-                if len(self._loss_events) == 0 or self._loss_events[0].timestamp + rtt < loss_timestamp:  # TODO: what happens if rtt is 0?
-                    # start new loss event, insert at index 0
-                    self._loss_events.insert(0, self.Entry(timestamp=loss_timestamp, sequence_number=loss_sequence_number))
-                    if len(self._loss_events) > NUMBER_OF_LOSS_INTERVALS:
-                        del self._loss_events[NUMBER_OF_LOSS_INTERVALS:]
-                    self.recalculate()
-                    logger.debug('Detected new loss event, updated loss event rate: %f', self.loss_event_rate)
-            del self._received_sequence_numbers[0]
-
-    def recalculate(self):
-        if len(self._loss_events) == 0:
-            return
-
-        # RFC 5348 Section 5.3
-        interval_sizes = [self._received_sequence_numbers[-1].sequence_number - self._loss_events[0].sequence_number + 1]
-        for i in range(1, len(self._loss_events)):
-            interval_sizes[i] = self._loss_events[i - 1].sequence_number - self._loss_events[i].sequence_number
-
-        # RFC 5348 Section 5.4
-        weights = [1 if i < NUMBER_OF_LOSS_INTERVALS / 2 else 2 * (NUMBER_OF_LOSS_INTERVALS - i) / (NUMBER_OF_LOSS_INTERVALS + 2) for i in range(0, len(self._loss_events))]
-
-        i_tot0 = 0
-        i_tot1 = 0
-        w_tot = 0
-        for i in range(len(self._loss_events) - 1):
-            i_tot0 = i_tot0 + interval_sizes[i] * weights[i]
-            w_tot = w_tot + weights[i]
-
-        for i in range(1, len(self._loss_events)):
-            i_tot1 = i_tot1 + interval_sizes[i] * weights[i - 1]
-
-        i_tot = max(i_tot0, i_tot1)
-        i_mean = i_tot / w_tot
-
-        self.loss_event_rate = 1 / i_mean
-
-        # TODO (OPTIONAL): RFC 5348 Section 5.5
-
-
 class TFRCReceiver:
+    Entry = namedtuple('Entry', ['timestamp', 'sequence_number'])
     PacketMeta = namedtuple('PacketMeta', ['rtt', 'timestamp', 'sequence_number', 'received_at'])
 
     def __init__(self, segment_size, feedback_timer):
         self._segment_size = segment_size
-        self._loss_event_rate_calculator = LossEventRateCalculator()
         self._feedback_timer = feedback_timer
-        self._feedback_timer.add_listener(self.handle_feedback_timer_expired)
+        self._feedback_timer += self._handle_feedback_timer_expired
         self._sender_params = None
         self._packet_count = 0
         self._feedback_timer_last_expired = None
         self._sent_feedback = False
+        self._max_receive_rate = 0
+        # initialize with -1 to be able to detect the packet with sequence number 0
+        self._received_sequence_numbers = [self.Entry(timestamp=Timestamp.now(), sequence_number=SequenceNumber(-1))]
+        self._loss_events = []
+        self._rtt = 0
+        self._loss_event_rate = 0
+
         self.feedback_handler = Event()
         self.rtt_updated = Event()
 
     def handle_data(self, timestamp, rtt, sequence_number):
         if rtt != 0:
             self.rtt_updated.trigger(rtt)
-
-        if self._sender_params is None:
-            # first data packet
-            self.feedback_handler.trigger(delay=0, timestamp=timestamp, receive_rate=0, loss_event_rate=0)
-        elif self._sender_params.rtt == 0:
-            # feedback timer has not been set yet
-            if rtt != 0:
-                self._feedback_timer.reset(rtt)
-
-            receive_rate = self._segment_size / (Timestamp.now() - self._sender_params.received_at)
-            self.feedback_handler.trigger(delay=0, timestamp=timestamp, receive_rate=receive_rate,
-                                          loss_event_rate=self._loss_event_rate_calculator.loss_event_rate)
+            self._rtt = rtt
 
         self._packet_count += 1
         if self._feedback_timer_last_expired is None:
@@ -132,21 +70,77 @@ class TFRCReceiver:
             self._sender_params = self.PacketMeta(rtt=rtt, timestamp=timestamp,
                                                   sequence_number=sequence_number, received_at=Timestamp.now())
 
-        previous_loss_event_rate = self._loss_event_rate_calculator.loss_event_rate
-        self._loss_event_rate_calculator.update(sequence_number, rtt)
-        if self._loss_event_rate_calculator.loss_event_rate > previous_loss_event_rate or not self._sent_feedback:
-            self._feedback_timer.expire()
+        if self._sender_params is None or self._sender_params.rtt == 0:
+            # feedback timer has not been set yet
+            if rtt != 0:
+                self._feedback_timer.reset(rtt)
 
-    def handle_feedback_timer_expired(self, expired_early):
+            self.feedback_handler.trigger(delay=0, timestamp=timestamp, receive_rate=0, loss_event_rate=0)
+        else:
+            previous_loss_event_rate = self._loss_event_rate
+            self._update_loss_history(sequence_number, rtt)
+            if self._loss_event_rate > previous_loss_event_rate or not self._sent_feedback:
+                self._feedback_timer.expire()
+
+    def _update_loss_history(self, sequence_number):
+        # RFC 5348 Section 5.1
+        self._received_sequence_numbers.append(self.Entry(timestamp=Timestamp.now(), sequence_number=sequence_number))
+        self._received_sequence_numbers.sort(key=lambda x: x.sequence_number)
+        if len(self._received_sequence_numbers) == NDUPACK + 1:
+            before, after = self._received_sequence_numbers[:2]
+            # RFC 5348 Section 5.2
+            for loss_sequence_number in range(before.sequence_number.value + 1, after.sequence_number.value):
+                loss_sequence_number = SequenceNumber(loss_sequence_number)
+                loss_timestamp = before.timestamp + (after.timestamp - before.timestamp) * (loss_sequence_number - before.sequence_number) / (after.sequence_number - before.sequence_number)
+                if len(self._loss_events) == 0 or self._loss_events[0].timestamp + self._rtt < loss_timestamp:  # TODO: what happens if rtt is 0?
+                    # start new loss event, insert at index 0
+                    self._loss_events.insert(0, self.Entry(timestamp=loss_timestamp, sequence_number=loss_sequence_number))
+                    if len(self._loss_events) > NUMBER_OF_LOSS_INTERVALS:
+                        del self._loss_events[NUMBER_OF_LOSS_INTERVALS:]
+                    self._recalculate_loss_event_rate()
+                    logger.debug('Detected new loss event, updated loss event rate: %f', self._loss_event_rate)
+            del self._received_sequence_numbers[0]
+
+    def _recalculate_loss_event_rate(self):
+        if len(self._loss_events) < 2:
+            pass
+        else:
+            # RFC 5348 Section 5.3
+            interval_sizes = [self._received_sequence_numbers[-1].sequence_number - self._loss_events[0].sequence_number + 1]
+            for i in range(1, len(self._loss_events)):
+                interval_sizes[i] = self._loss_events[i - 1].sequence_number - self._loss_events[i].sequence_number
+
+            # RFC 5348 Section 5.4
+            weights = [1 if i < NUMBER_OF_LOSS_INTERVALS / 2 else 2 * (NUMBER_OF_LOSS_INTERVALS - i) / (NUMBER_OF_LOSS_INTERVALS + 2) for i in range(0, len(self._loss_events))]
+
+            i_tot0 = 0
+            i_tot1 = 0
+            w_tot = 0
+            for i in range(len(self._loss_events) - 1):
+                i_tot0 = i_tot0 + interval_sizes[i] * weights[i]
+                w_tot = w_tot + weights[i]
+
+            for i in range(1, len(self._loss_events)):
+                i_tot1 = i_tot1 + interval_sizes[i] * weights[i - 1]
+
+            i_tot = max(i_tot0, i_tot1)
+            i_mean = i_tot / w_tot
+
+            self._loss_event_rate = 1 / i_mean
+
+            # TODO (OPTIONAL): RFC 5348 Section 5.5
+
+    def _handle_feedback_timer_expired(self, expired_early):
         # RFC 5348 Section 6.2
         if self._packet_count != 0:
-            self._loss_event_rate_calculator.recalculate()
             receive_rate = self._packet_count * self._segment_size / (Timestamp.now() - self._feedback_timer_last_expired)
+            self._max_receive_rate = max(receive_rate, self._max_receive_rate)
+            self._recalculate_loss_event_rate()
 
             delay = Timestamp.now() - self._sender_params.received_at
             self.feedback_handler.trigger(delay=delay, timestamp=self._sender_params.timestamp,
                                           receive_rate=receive_rate,
-                                          loss_event_rate=self._loss_event_rate_calculator.loss_event_rate)
+                                          loss_event_rate=self._loss_event_rate)
             self._sent_feedback = True
 
             if not expired_early:
