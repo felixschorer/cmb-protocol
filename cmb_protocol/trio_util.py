@@ -17,6 +17,14 @@ class Timer:
         self._cancel_scope = None
         self._deadline = None
 
+    def __iadd__(self, other):
+        self.add_listener(other)
+        return self
+
+    def __isub__(self, other):
+        self.remove_listener(other)
+        return self
+
     def reset(self, timeout):  # timeout in seconds
         self._stop_waiter()
         self._deadline = trio.current_time() + timeout

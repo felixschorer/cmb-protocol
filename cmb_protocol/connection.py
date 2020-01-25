@@ -1,5 +1,7 @@
 from abc import ABC
 
+import trio
+
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
@@ -71,20 +73,37 @@ class ClientSideConnection(Connection):
 
         self.decoders = dict()  # block_id -> decoder
 
-        self.spawn(self.init_protocol)
-
         self.tfrc = TFRCReceiver(SEGMENT_SIZE, Timer(self.spawn))
         self.tfrc.feedback_handler += self.send_feedback
 
-    async def init_protocol(self):
-        flags = RequestResourceFlags.REVERSE if self.reverse else RequestResourceFlags.NONE
-        resource_request = RequestResource(flags=flags,
-                                           resource_id=self.resource_id,
-                                           block_offset=self.offset)
-        await self.send(resource_request)
+        self.connection_timout = Timer(self.spawn)
+        self.connection_timout += self.handle_connection_timeout
+
+        self.establish_connection_scope = None
+        self.spawn(self.establish_connection)
+
+    async def establish_connection(self):
+        with trio.CancelScope() as cancel_scope:
+            self.establish_connection_scope = cancel_scope
+            while True:
+                flags = RequestResourceFlags.REVERSE if self.reverse else RequestResourceFlags.NONE
+                resource_request = RequestResource(flags=flags,
+                                                   resource_id=self.resource_id,
+                                                   block_offset=self.offset)
+                await self.send(resource_request)
+                await trio.sleep(1)
+
+    def handle_connection_timeout(self):
+        self.spawn(self.establish_connection)
 
     async def handle_data(self, packet):
+        self.connection_timout.reset(10)
+
         self.tfrc.handle_data(packet.timestamp, packet.estimated_rtt, packet.sequence_number)
+
+        if self.establish_connection_scope is not None:
+            self.establish_connection_scope.cancel()
+            self.establish_connection_scope = None
 
         recent = packet.block_id <= self.offset if self.reverse else packet.block_id >= self.offset
         if recent:
@@ -138,6 +157,7 @@ class ClientSideConnection(Connection):
     def shutdown(self):
         super().shutdown()
         self.tfrc.close()
+        self.connection_timout.clear_listeners()
 
 
 class ServerSideConnection(Connection):
