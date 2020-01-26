@@ -16,6 +16,7 @@ logger = log_util.get_logger(__name__)
 
 SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + Data.HEADER_SIZE + RAPTORQ_HEADER_SIZE + MAXIMUM_TRANSMISSION_UNIT
 MAXIMUM_HEARTBEAT_INTERVAL = 0.25
+SCHEDULING_GRANULARITY = 0.001
 
 
 class Connection(ABC):
@@ -79,20 +80,22 @@ class ClientSideConnection(Connection):
         self.rtt = None
         self.cancel_scope = None
 
-        self.spawn(self.establish_connection)
+        self.spawn(self.keep_connection_alive)
 
-    async def establish_connection(self):
+    async def keep_connection_alive(self):
         with trio.CancelScope() as cancel_scope:
             self.cancel_scope = cancel_scope
             while True:
+                sending_rate = 500000  # TODO
                 flags = RequestResourceFlags.REVERSE if self.reverse else RequestResourceFlags.NONE
                 resource_request = RequestResource(flags=flags,
                                                    timestamp=Timestamp.now(),
-                                                   sending_rate=500000,  # TODO
+                                                   sending_rate=sending_rate,
                                                    resource_id=self.resource_id,
                                                    block_offset=self.offset)
                 await self.send(resource_request)
-                interval = MAXIMUM_HEARTBEAT_INTERVAL if self.rtt is None else min(self.rtt, MAXIMUM_HEARTBEAT_INTERVAL)
+                min_interval = max(4 * SEGMENT_SIZE / sending_rate, SCHEDULING_GRANULARITY)
+                interval = MAXIMUM_HEARTBEAT_INTERVAL if self.rtt is None else max(min_interval, min(self.rtt, MAXIMUM_HEARTBEAT_INTERVAL))
                 await trio.sleep(interval)
 
     async def handle_data(self, packet):
@@ -201,8 +204,12 @@ class ServerSideConnection(Connection):
             sequence_number = SequenceNumber(0)
             send_time = Timestamp.now()
             while True:
+                if Timestamp.now() - self.recent_resource_request_received_at > 4 * MAXIMUM_HEARTBEAT_INTERVAL:
+                    logger.debug('Connection timed out')
+                    return  # connection is broken, shutdown
+
                 if Timestamp.now() < send_time:
-                    await trio.sleep(1)
+                    await trio.sleep(SCHEDULING_GRANULARITY)
                 else:
                     try:
                         block_id, fec_data = next(packet_iter)
