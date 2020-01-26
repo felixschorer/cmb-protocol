@@ -71,15 +71,14 @@ async def fetch(resource_id, server_addresses):
             def connection_closed():
                 del connections[reverse_direction]
 
-            async def write_blocks(offset, received_blocks):
+            async def write_block(block_id, received_block):
                 # TODO: maybe need to reverse received blocks if reversed=True
-                blocks[offset:offset + len(received_blocks)] = received_blocks
+                blocks[block_id - 1] = received_block  # block ids start at 1
 
                 if (not reverse_direction) in connections:
-                    stop_at_block_id = offset if reverse_direction else offset + len(received_blocks) - 1
-                    await connections[not reverse_direction].send_stop(stop_at_block_id)
+                    await connections[not reverse_direction].send_stop(block_id)
 
-            nursery.start_soon(run_receive_loop, connection_opened, connection_closed, write_blocks, server_address,
+            nursery.start_soon(run_receive_loop, connection_opened, connection_closed, write_block, server_address,
                                resource_id, reverse_direction)
 
         for reverse, address in server_addresses.items():

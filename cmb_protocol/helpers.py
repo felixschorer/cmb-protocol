@@ -29,7 +29,7 @@ def is_reversed(start, end):
 
 
 def directed_range(start, end):
-    return reversed(range(end, start)) if is_reversed(start, end) else range(start, end)
+    return reversed(range(end + 1, start + 1)) if is_reversed(start, end) else range(start, end)
 
 
 def once(func):

@@ -1,7 +1,6 @@
 import struct
 import trio
 import hashlib
-from collections import OrderedDict
 from functools import partial
 from trio import socket
 from cmb_protocol.coding import Encoder
@@ -77,7 +76,7 @@ async def serve(addresses, resource_id, encoders):
 def run(file_reader, addresses):
     md5 = hashlib.md5()
     resource_length = 0
-    encoders = OrderedDict()  # block_id -> encoder
+    encoders = dict()  # block_id -> encoder
 
     with file_reader:
         logger.debug('Reading from %s', file_reader.name)
