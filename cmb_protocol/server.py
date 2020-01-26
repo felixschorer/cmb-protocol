@@ -42,7 +42,7 @@ async def run_accept_loop(udp_sock, resource_id, encoders):
         while True:
             try:
                 data, address = await udp_sock.recvfrom(2048)
-                log_util.set_remote_address(address)
+                log_util.set_remote_address(address[:2])
 
                 packet = PacketType.parse_packet(data)
             except (ConnectionResetError, ConnectionRefusedError):

@@ -19,7 +19,7 @@ async def run_receive_loop(connection_opened, connection_closed, write_blocks, s
                 socket.socket(family=get_ip_family(server_address), type=socket.SOCK_DGRAM) as udp_sock:
 
             await udp_sock.connect(server_address)
-            log_util.set_listen_address(udp_sock.getsockname())
+            log_util.set_listen_address(udp_sock.getsockname()[:2])
             log_util.set_remote_address(server_address)
 
             @once
