@@ -91,6 +91,14 @@ async def fetch(resource_id, server_addresses):
     return blocks
 
 
+def log_value_error(exc):
+    if isinstance(exc, ValueError):
+        logger.error(exc)
+        return None
+    else:
+        return exc
+
+
 def run(resource_id, file_writer, server_addresses):
     if hasattr(file_writer, 'buffer'):
         # in case of stdout we have to use the buffer to write binary data
@@ -98,8 +106,9 @@ def run(resource_id, file_writer, server_addresses):
 
     logger.debug('Writing to %s', file_writer.name)
 
-    blocks = trio.run(fetch, resource_id, server_addresses)
+    with trio.MultiError.catch(log_value_error):
+        blocks = trio.run(fetch, resource_id, server_addresses)
 
-    with file_writer:
-        for block in blocks:
-            file_writer.write(block)
+        with file_writer:
+            for block in blocks:
+                file_writer.write(block)

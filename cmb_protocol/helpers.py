@@ -1,5 +1,8 @@
 import struct
 from functools import wraps
+from ipaddress import ip_address, IPv6Address
+
+from cmb_protocol.constants import RESOURCE_ID_STRUCT_FORMAT
 
 
 def pack_uint48(uint48):
@@ -43,3 +46,18 @@ def once(func):
             func(*args, **kwargs)
 
     return wrapped
+
+
+def format_resource_id(resource_id):
+    return struct.pack(RESOURCE_ID_STRUCT_FORMAT, *resource_id).hex()
+
+
+def format_address(address):
+    ip_addr, port = address
+    try:
+        parsed_ip_addr = ip_address(ip_addr)
+    except ValueError:
+        return repr(address)
+    else:
+        fmt = '[{}]:{}' if isinstance(parsed_ip_addr, IPv6Address) else '{}:{}'
+        return fmt.format(parsed_ip_addr.compressed, port)

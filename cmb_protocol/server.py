@@ -1,13 +1,12 @@
-import struct
 import trio
 import hashlib
 from functools import partial
 from trio import socket
 from cmb_protocol.coding import Encoder
 from cmb_protocol.connection import ServerSideConnection
-from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK, RESOURCE_ID_STRUCT_FORMAT
+from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, SYMBOLS_PER_BLOCK
 from cmb_protocol.packets import PacketType, RequestResource
-from cmb_protocol.helpers import once
+from cmb_protocol.helpers import once, format_resource_id
 from cmb_protocol.trio_util import spawn_child_nursery, get_ip_family
 from cmb_protocol import log_util
 
@@ -90,7 +89,6 @@ def run(file_reader, addresses):
 
     resource_hash = md5.digest()
     resource_id = (resource_hash, resource_length)
-    packed_resource_id = struct.pack(RESOURCE_ID_STRUCT_FORMAT, *resource_id).hex()
 
-    logger.info('Serving resource %s', packed_resource_id)
+    logger.info('Serving resource %s', format_resource_id(resource_id))
     trio.run(serve, addresses, resource_id, encoders)

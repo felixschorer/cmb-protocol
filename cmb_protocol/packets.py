@@ -64,12 +64,6 @@ class Packet(ABC, metaclass=_PacketMeta):
         pass
 
 
-@unique
-class RequestResourceFlags(IntEnum):
-    NONE = 0
-    REVERSE = 1
-
-
 class RequestResource(Packet):
     __slots__ = 'timestamp', 'sending_rate', 'block_range_start', 'resource_id', 'block_range_end'
 

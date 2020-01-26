@@ -4,8 +4,10 @@ import trio
 
 from cmb_protocol import log_util
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
-from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size
-from cmb_protocol.helpers import is_reversed, directed_range
+from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size, \
+    SENDING_RATE
+from cmb_protocol.helpers import is_reversed, directed_range, format_resource_id
+from cmb_protocol.log_util import get_logging_context
 from cmb_protocol.packets import RequestResource, AckBlock, NackBlock, ShrinkRange, Data, Error, ErrorCode, Packet
 from cmb_protocol.sequence_number import SequenceNumber
 from cmb_protocol.timestamp import Timestamp
@@ -98,14 +100,13 @@ class ClientSideConnection(Connection):
         with trio.CancelScope() as cancel_scope:
             self.cancel_scope = cancel_scope
             while True:
-                sending_rate = 500000  # TODO
                 resource_request = RequestResource(timestamp=Timestamp.now(),
-                                                   sending_rate=sending_rate,
+                                                   sending_rate=SENDING_RATE,
                                                    block_range_start=self.block_range_start,
                                                    resource_id=self.resource_id,
                                                    block_range_end=self.block_range_end)
                 await self.send(resource_request)
-                min_interval = max(4 * SEGMENT_SIZE / sending_rate, SCHEDULING_GRANULARITY)
+                min_interval = max(4 * SEGMENT_SIZE / SENDING_RATE, SCHEDULING_GRANULARITY)
                 interval = \
                     MAXIMUM_HEARTBEAT_INTERVAL \
                     if self.rtt is None else \
@@ -187,8 +188,9 @@ class ClientSideConnection(Connection):
             await self.send(AckBlock(block_id=packet.block_id))
 
     def handle_error(self, packet):
-        # TODO: error handling?
-        self.shutdown()
+        if ErrorCode.RESOURCE_NOT_FOUND == packet.error_code:
+            raise ValueError('Resource {} not found on {}'.format(format_resource_id(self.resource_id),
+                                                                  get_logging_context('remote_address')))
 
     async def handle_packet(self, packet):
         """

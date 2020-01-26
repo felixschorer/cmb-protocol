@@ -1,7 +1,8 @@
 import logging
 from contextvars import ContextVar
-from ipaddress import ip_address, IPv6Address
 from logging import LoggerAdapter
+
+from cmb_protocol.helpers import format_address
 
 logging.basicConfig(format='[%(levelname)s]\t%(message)s', level=logging.INFO)
 
@@ -46,12 +47,5 @@ def update_logging_context(**kwargs):
     _logging_context.set({**curr, **kwargs})
 
 
-def format_address(address):
-    ip_addr, port = address
-    try:
-        parsed_ip_addr = ip_address(ip_addr)
-    except ValueError:
-        return repr(address)
-    else:
-        fmt = '[{}]:{}' if isinstance(parsed_ip_addr, IPv6Address) else '{}:{}'
-        return fmt.format(parsed_ip_addr.compressed, port)
+def get_logging_context(key):
+    return _logging_context.get({}).get(key, None)
