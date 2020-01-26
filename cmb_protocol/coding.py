@@ -11,7 +11,6 @@ class Encoder:
             data += bytes(symbol_size - padded_symbol_length)
         self._enc = SourceBlockEncoder(0, symbol_size, data)
 
-    @property
     def source_packets(self):
         return self._enc.source_packets()
 

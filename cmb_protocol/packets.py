@@ -71,34 +71,39 @@ class RequestResourceFlags(IntEnum):
 
 
 class RequestResource(Packet):
-    __slots__ = 'flags', 'timestamp', 'sending_rate', 'resource_id', 'block_offset'
+    __slots__ = 'timestamp', 'sending_rate', 'block_range_start', 'resource_id', 'block_range_end'
 
     _packet_type_ = 0xcb00
 
-    __format = '!B3sI16sQQ'
+    __format = '!1s3sI6s16sQ6s'
 
-    def __init__(self, flags, timestamp, sending_rate, resource_id, block_offset):
+    def __init__(self, timestamp, sending_rate, block_range_start, resource_id, block_range_end):
         super().__init__()
         assert isinstance(timestamp, Timestamp)
-        self.flags = flags
         self.timestamp = timestamp
         self.sending_rate = sending_rate
+        self.block_range_start = block_range_start
         self.resource_id = resource_id
-        self.block_offset = block_offset
+        self.block_range_end = block_range_end
 
     def _serialize_fields(self):
-        values = self.flags, self.timestamp.to_bytes(), self.sending_rate, *self.resource_id, self.block_offset
+        values = bytes(1), \
+                 self.timestamp.to_bytes(), \
+                 self.sending_rate, \
+                 pack_uint48(self.block_range_start), \
+                 *self.resource_id, \
+                 pack_uint48(self.block_range_end)
         return struct.pack(self.__format, *values)
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        flags, timestamp, sending_rate, resource_hash, resource_length, block_offset \
+        _, timestamp, sending_rate, block_range_start, resource_hash, resource_length, block_range_end \
             = struct.unpack(cls.__format, packet_bytes)
-        return RequestResource(flags=flags,
-                               timestamp=Timestamp.from_bytes(timestamp),
+        return RequestResource(timestamp=Timestamp.from_bytes(timestamp),
                                sending_rate=sending_rate,
+                               block_range_start=unpack_uint48(block_range_start),
                                resource_id=(resource_hash, resource_length),
-                               block_offset=block_offset)
+                               block_range_end=unpack_uint48(block_range_end))
 
 
 class Data(Packet):
@@ -178,24 +183,26 @@ class NackBlock(Packet):
         return NackBlock(block_id=unpack_uint48(block_id), received_packets=received_packets)
 
 
-class AckOppositeRange(Packet):
-    __slots__ = 'stop_at_block_id',
+class ShrinkRange(Packet):
+    __slots__ = 'block_range_start', 'block_range_end'
 
     _packet_type_ = 0xcb04
 
-    __format = '!6s'
+    __format = '!6s6s'
 
-    def __init__(self, stop_at_block_id):
+    def __init__(self, block_range_start, block_range_end):
         super().__init__()
-        self.stop_at_block_id = stop_at_block_id
+        self.block_range_start = block_range_start
+        self.block_range_end = block_range_end
 
     def _serialize_fields(self):
-        return struct.pack(self.__format, pack_uint48(self.stop_at_block_id))
+        return struct.pack(self.__format, pack_uint48(self.block_range_start), pack_uint48(self.block_range_end))
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        stop_at_block_id, = struct.unpack(cls.__format, packet_bytes)
-        return AckOppositeRange(stop_at_block_id=unpack_uint48(stop_at_block_id))
+        block_range_start, block_range_end = struct.unpack(cls.__format, packet_bytes)
+        return ShrinkRange(block_range_start=unpack_uint48(block_range_start),
+                           block_range_end=unpack_uint48(block_range_end))
 
 
 @unique
@@ -234,7 +241,7 @@ class PacketType(Enum):
     DATA = Data
     ACK_BLOCK = AckBlock
     NACK_BLOCK = NackBlock
-    ACK_OPPOSITE_RANGE = AckOppositeRange
+    SHRINK_RANGE = ShrinkRange
     ERROR = Error
 
     def __new__(cls, packet_cls):

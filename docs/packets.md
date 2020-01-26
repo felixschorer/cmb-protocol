@@ -7,36 +7,37 @@ and to regulate the rate at which the sender sends.
 ```
      0                              15 16                             32
     ┌─────────────────────────────────┬────────────────┬────────────────┐
-  0 |              0xcb00             |     Flags      |    Timestamp   |
+  0 |              0xcb00             |    Reserved    |    Timestamp   |
     ├─────────────────────────────────┼────────────────┴────────────────┤
   4 |            Timestamp            |           Sending Rate          |
     ├─────────────────────────────────┼─────────────────────────────────┤
   8 |           Sending Rate          |                                 |
     ├─────────────────────────────────┘                                 |
- 12 |                                                                   |
-    |                                                                   |
+ 12 |                         Block Range Start                         |
+    ├───────────────────────────────────────────────────────────────────┤
  16 |                                                                   |
-    |                           Resource Hash                           |
+    |                                                                   |
  20 |                                                                   |
-    |                                 ┌─────────────────────────────────┤
- 24 |                                 |                                 |
-    ├─────────────────────────────────┘                                 |
- 28 |                          Resource Length                          |
-    |                                 ┌─────────────────────────────────┤
- 32 |                                 |                                 |
-    ├─────────────────────────────────┘                                 |
- 36 |                           Block Offset                            |
+    |                           Resource Hash                           |
+ 24 |                                                                   |
+    |                                                                   |
+ 28 |                                                                   |
+    ├───────────────────────────────────────────────────────────────────┤
+ 32 |                                                                   |
+    |                         Resource Length                           |
+ 36 |                                                                   |
+    ├───────────────────────────────────────────────────────────────────┤
+ 40 |                         Block Range End                           |
     |                                 ┌─────────────────────────────────┘
- 40 |                                 |
+ 44 |                                 |
     └─────────────────────────────────┘
 ```
-- Flags: 8 bit field for specifying various options
-  - 0x01 REVERSE: Reverse the order in which the blocks are sent
 - Timestamp: 24 bit relative timestamp in milliseconds
 - Sending Rate: 32 bit unsigned integer in bps 
+- Block Range Start: 48 bit unsigned integer marking the start of the range (inclusive)
 - Resource Hash: 128 bit identifier of the requested resource
 - Resource Length: Length of the resource
-- Block Offset: 64 bit unsigned integer to resume the transfer from a previous connection
+- Block Range End: 48 bit unsigned integer marking the end of the range (exclusive)
 
 ## Data
 ```
@@ -89,7 +90,7 @@ Packet to notify the sender to send repair packets of the given block.
 - Block ID: 48 bit identifier of the block whose receipt has been acknowledged
 - Received Packets: Number of packets of this block which have been received (16 bit unsigned integer)
 
-## Ack Opposite Range
+## Shrink range
 Send by send_stop by the client in order to stop the sending process.
 Acknowledges the receipt of a block range from the given block to the end of the block sequence.
 ```
@@ -97,10 +98,15 @@ Acknowledges the receipt of a block range from the given block to the end of the
     ┌─────────────────────────────────┬─────────────────────────────────┐
   0 |              0xcb04             |                                 |
     ├─────────────────────────────────┘                                 |
-  4 |                         Stop at Block ID                          |
-    └───────────────────────────────────────────────────────────────────┘
+  4 |                        Block Range Start                          |
+    ├───────────────────────────────────────────────────────────────────┤
+  8 |                         Block Range End                           |
+    |                                 ┌─────────────────────────────────┘
+ 12 |                                 |
+    └─────────────────────────────────┘
 ```
-- Stop at Block ID: 48 bit identifier of the block who marks the start of the acknowledged range
+- Block Range Start: 48 bit unsigned integer marking the start of the range (inclusive)
+- Block Range End: 48 bit unsigned integer marking the end of the range (exclusive)
 
 ## Error
 Generic error packet that can be identified by its Error Code
