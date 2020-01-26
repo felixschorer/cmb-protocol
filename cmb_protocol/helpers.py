@@ -24,6 +24,14 @@ def unpack_uint24(buffer):
     return uint24
 
 
+def is_reversed(start, end):
+    return end < start
+
+
+def directed_range(start, end):
+    return reversed(range(end, start)) if is_reversed(start, end) else range(start, end)
+
+
 def once(func):
     has_been_called = False
 

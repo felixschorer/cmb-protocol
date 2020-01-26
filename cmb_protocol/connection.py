@@ -5,6 +5,7 @@ import trio
 from cmb_protocol import log_util
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size
+from cmb_protocol.helpers import is_reversed, directed_range
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, ShrinkRange, Data, \
     Error, ErrorCode, Packet
 from cmb_protocol.sequence_number import SequenceNumber
@@ -70,10 +71,10 @@ class ClientSideConnection(Connection):
         self.reverse = reverse
 
         _, resource_length = self.resource_id
-        last_block_id = calculate_number_of_blocks(resource_length) - 1
+        last_block_id = calculate_number_of_blocks(resource_length)  # block id starts at 1
 
-        self.stop_after_block_id = 0 if self.reverse else last_block_id
-        self.offset = last_block_id if self.reverse else 0
+        self.block_range_start = last_block_id if self.reverse else 1  # inclusive
+        self.block_range_end = 0 if self.reverse else last_block_id + 1  # exclusive
 
         self.decoders = dict()  # block_id -> decoder
 
@@ -167,35 +168,34 @@ class ServerSideConnection(Connection):
         super().__init__(shutdown, spawn, send)
         self.resource_id = resource_id
         self.encoders = encoders
-        self.unacknowlegded_blocks = set(encoders.keys())
+        self.acknowledged_blocks = set()
         self.connected = False
-        self.reverse = None
 
-        self.recent_resource_request_received_at = None
-        self.recent_resource_request = None
+        self.block_range_start = None
+        self.block_range_end = None
+        self.sending_rate = None
+        self.recent_receiver_timestamp = None
 
-    async def handle_request_resource(self, packet):
-        self.recent_resource_request_received_at = Timestamp.now()
-        self.recent_resource_request = packet
+        self.keep_alive_received_at = None
 
-        if self.resource_id != packet.resource_id:
-            await self.send(Error(ErrorCode.RESOURCE_NOT_FOUND))
-            self.shutdown()
-        elif not self.connected:
-            self.reverse = bool(packet.flags & RequestResourceFlags.REVERSE)
-            self.connected = True
-            self.spawn(self.send_blocks)
-        else:
-            pass  # already connected and sending
+    @property
+    def block_range_reversed(self):
+        return self.connected and is_reversed(self.block_range_start, self.block_range_end)
+
+    @property
+    def active_block_range(self):
+        return directed_range(self.block_range_start, self.block_range_end)
 
     def packets(self):
-        for block_id, encoder in reversed(self.encoders.items()) if self.reverse else self.encoders.items():
-            if block_id not in self.unacknowlegded_blocks:
+        for block_id in self.active_block_range:
+            # check in every outer iteration if we have received a stop signal in the meantime
+            if block_id in self.acknowledged_blocks or block_id not in self.active_block_range:
                 continue
 
+            encoder = self.encoders[block_id]
             for fec_data in encoder.source_packets():
-                # check in every iteration if we have received a stop signal in the meantime
-                if block_id not in self.unacknowlegded_blocks:
+                # check in every inner iteration if we have received a stop signal in the meantime
+                if block_id in self.acknowledged_blocks or block_id not in self.active_block_range:
                     break
 
                 yield block_id, fec_data
@@ -206,7 +206,7 @@ class ServerSideConnection(Connection):
             sequence_number = SequenceNumber(0)
             send_time = Timestamp.now()
             while True:
-                if Timestamp.now() - self.recent_resource_request_received_at > 4 * MAXIMUM_HEARTBEAT_INTERVAL:
+                if Timestamp.now() - self.keep_alive_received_at > 4 * MAXIMUM_HEARTBEAT_INTERVAL:
                     logger.debug('Connection timed out')
                     return  # connection is broken, shutdown
 
@@ -216,33 +216,64 @@ class ServerSideConnection(Connection):
                     try:
                         block_id, fec_data = next(packet_iter)
                     except StopIteration:
-                        return
+                        break  # all source packets have been sent
                     else:
                         packet = Data(block_id=block_id,
-                                      timestamp=self.recent_resource_request.timestamp,
-                                      delay=Timestamp.now() - self.recent_resource_request_received_at,
+                                      timestamp=self.recent_receiver_timestamp,
+                                      delay=Timestamp.now() - self.keep_alive_received_at,
                                       sequence_number=sequence_number,
                                       fec_data=fec_data)
                         await self.send(packet)
                         sequence_number += 1
-                        send_time += SEGMENT_SIZE / self.recent_resource_request.sending_rate
+                        send_time += SEGMENT_SIZE / self.sending_rate
+            # TODO: enter preemptive repair phase
         finally:
             self.shutdown()
 
-    async def handle_ack_block(self, packet):
-        if packet.block_id in self.unacknowlegded_blocks:
-            self.unacknowlegded_blocks.remove(packet.block_id)
+    def shrink_range(self, block_range_start, block_range_end):
+        block_range_reversed = is_reversed(block_range_start, block_range_end)
+        if block_range_start == block_range_end:
+            self.block_range_end = self.block_range_start = block_range_start
+        elif self.block_range_reversed and block_range_reversed:
+            if self.block_range_end < block_range_end:
+                self.block_range_end = block_range_end
+            if self.block_range_start > block_range_start:
+                self.block_range_start = block_range_start
+        elif not self.block_range_reversed and not block_range_reversed:
+            if self.block_range_start < block_range_start:
+                self.block_range_start = block_range_start
+            if self.block_range_end > block_range_end:
+                self.block_range_end = block_range_end
+        else:
+            logger.warning('Ranges [%d:%d) and [%d:%d) have opposing direction',
+                           self.block_range_start, self.block_range_end, block_range_start, block_range_end)
 
-    async def handle_nack_block(self, packet):
+    async def handle_request_resource(self, packet):
+        if self.resource_id != packet.resource_id:
+            await self.send(Error(ErrorCode.RESOURCE_NOT_FOUND))
+            self.shutdown()
+            return
+
+        self.keep_alive_received_at = Timestamp.now()
+        self.sending_rate = packet.sending_rate
+        self.recent_receiver_timestamp = packet.timestamp
+
+        if not self.connected:
+            self.block_range_start = packet.block_range_start
+            self.block_range_end = packet.block_range_end
+            self.connected = True
+            self.spawn(self.send_blocks)
+        else:
+            self.shrink_range(packet.block_range_start, packet.block_range_end)
+
+    def handle_ack_block(self, packet):
+        self.acknowledged_blocks.add(packet.block_id)
+
+    def handle_nack_block(self, packet):
         pass
 
-    async def handle_ack_opposite_range(self, packet):
-        acknowledged_blocks = set(
-            range(0, packet.stop_at_block_id + 1)
-            if self.reverse else
-            range(packet.stop_at_block_id, len(self.encoders))
-        )
-        self.unacknowlegded_blocks.difference_update(acknowledged_blocks)
+    def handle_shrink_range(self, packet):
+        self.shrink_range(packet.block_range_start, packet.block_range_end)
 
     async def handle_packet(self, packet):
         """
@@ -252,11 +283,8 @@ class ServerSideConnection(Connection):
         if isinstance(packet, RequestResource):
             await self.handle_request_resource(packet)
         elif isinstance(packet, AckBlock):
-            await self.handle_ack_block(packet)
+            self.handle_ack_block(packet)
         elif isinstance(packet, NackBlock):
-            await self.handle_nack_block(packet)
+            self.handle_nack_block(packet)
         elif isinstance(packet, ShrinkRange):
-            await self.handle_ack_opposite_range(packet)
-
-    def shutdown(self):
-        super().shutdown()
+            self.handle_shrink_range(packet)

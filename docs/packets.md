@@ -90,7 +90,7 @@ Packet to notify the sender to send repair packets of the given block.
 - Block ID: 48 bit identifier of the block whose receipt has been acknowledged
 - Received Packets: Number of packets of this block which have been received (16 bit unsigned integer)
 
-## Shrink range
+## Shrink Range
 Send by send_stop by the client in order to stop the sending process.
 Acknowledges the receipt of a block range from the given block to the end of the block sequence.
 ```
