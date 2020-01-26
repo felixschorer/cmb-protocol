@@ -71,63 +71,68 @@ class RequestResourceFlags(IntEnum):
 
 
 class RequestResource(Packet):
-    __slots__ = 'flags', 'resource_id', 'block_offset'
+    __slots__ = 'flags', 'timestamp', 'sending_rate', 'resource_id', 'block_offset'
 
     _packet_type_ = 0xcb00
 
-    __format = '!B1s16sQQ'
+    __format = '!B3sI16sQQ'
 
-    def __init__(self, flags, resource_id, block_offset):
+    def __init__(self, flags, timestamp, sending_rate, resource_id, block_offset):
         super().__init__()
+        assert issubclass(timestamp, Timestamp)
         self.flags = flags
+        self.timestamp = timestamp
+        self.sending_rate = sending_rate
         self.resource_id = resource_id
         self.block_offset = block_offset
 
     def _serialize_fields(self):
-        resource_hash, resource_length = self.resource_id
-        return struct.pack(self.__format,
-                           self.flags, bytes(1), resource_hash, resource_length, self.block_offset)
+        values = self.flags, self.timestamp.to_bytes(), self.sending_rate, *self.resource_id, self.block_offset
+        return struct.pack(self.__format, *values)
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        flags, reserved, resource_hash, resource_length, block_offset = struct.unpack(cls.__format, packet_bytes)
+        flags, timestamp, sending_rate, resource_hash, resource_length, block_offset \
+            = struct.unpack(cls.__format, packet_bytes)
         return RequestResource(flags=flags,
+                               timestamp=Timestamp.from_bytes(timestamp),
+                               sending_rate=sending_rate,
                                resource_id=(resource_hash, resource_length),
                                block_offset=block_offset)
 
 
 class Data(Packet):
-    __slots__ = 'block_id', 'timestamp', 'estimated_rtt', 'sequence_number', 'fec_data'
+    __slots__ = 'block_id', 'timestamp', 'delay', 'sequence_number', 'fec_data'
 
     _packet_type_ = 0xcb01
 
     __format = '!6s3sH3s'
     HEADER_SIZE = struct.calcsize(__format)
 
-    def __init__(self, block_id, timestamp, estimated_rtt, sequence_number, fec_data):
+    def __init__(self, block_id, timestamp, delay, sequence_number, fec_data):
         super().__init__()
-        self.block_id = block_id
-        self.fec_data = fec_data
         assert isinstance(timestamp, Timestamp)
-        self.timestamp = timestamp
-        self.estimated_rtt = estimated_rtt
         assert isinstance(sequence_number, SequenceNumber)
+        self.block_id = block_id
+        self.timestamp = timestamp
+        self.delay = delay
         self.sequence_number = sequence_number
+        self.fec_data = fec_data
 
     def _serialize_fields(self):
         values = pack_uint48(self.block_id), \
                  self.timestamp.to_bytes(), \
-                 int(self.estimated_rtt * 1000), \
+                 int(self.delay * 1000), \
                  self.sequence_number.to_bytes()
         return struct.pack(self.__format, *values) + self.fec_data
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
         header, fec_data = packet_bytes[:cls.HEADER_SIZE], packet_bytes[cls.HEADER_SIZE:]
-        block_id, timestamp, estimated_rtt, sequence_number = struct.unpack(cls.__format, header)
+        block_id, timestamp, delay, sequence_number = struct.unpack(cls.__format, header)
         return Data(block_id=unpack_uint48(block_id),
                     timestamp=Timestamp.from_bytes(timestamp),
-                    estimated_rtt=estimated_rtt / 1000,
+                    delay=delay / 1000,
                     sequence_number=SequenceNumber.from_bytes(sequence_number),
                     fec_data=fec_data)
 
@@ -219,38 +224,6 @@ class Error(Packet):
         return Error(error_code=ErrorCode(error_code))
 
 
-class Feedback(Packet):
-    __slots__ = 'delay', 'timestamp', 'receive_rate', 'loss_event_rate'
-
-    _packet_type_ = 0xcb06
-
-    __format = '!H3s1sIf'
-
-    def __init__(self, delay, timestamp, receive_rate, loss_event_rate):
-        super().__init__()
-        self.delay = delay
-        assert isinstance(timestamp, Timestamp)
-        self.timestamp = timestamp
-        self.receive_rate = receive_rate
-        self.loss_event_rate = loss_event_rate
-
-    def _serialize_fields(self):
-        values = int(self.delay * 1000), \
-                 self.timestamp.to_bytes(), \
-                 bytes(1), \
-                 int(self.receive_rate), \
-                 self.loss_event_rate
-        return struct.pack(self.__format, *values)
-
-    @classmethod
-    def _parse_fields(cls, packet_bytes):
-        delay, timestamp, reserved, receive_rate, loss_event_rate = struct.unpack(cls.__format, packet_bytes)
-        return Feedback(delay=delay / 1000,
-                        timestamp=Timestamp.from_bytes(timestamp),
-                        receive_rate=receive_rate,
-                        loss_event_rate=loss_event_rate)
-
-
 @unique
 class PacketType(Enum):
     """
@@ -263,7 +236,6 @@ class PacketType(Enum):
     NACK_BLOCK = NackBlock
     ACK_OPPOSITE_RANGE = AckOppositeRange
     ERROR = Error
-    FEEDBACK = Feedback
 
     def __new__(cls, packet_cls):
         assert issubclass(packet_cls, Packet)
