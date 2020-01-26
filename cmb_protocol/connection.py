@@ -224,6 +224,7 @@ class ServerSideConnection(Connection):
         super().__init__(shutdown, spawn, send)
         self.resource_id = resource_id
         self.encoders = encoders
+        self.repair_packet_generators = dict()  # block_id -> repair packet iterator
         self.acknowledged_blocks = set()
         self.connected = False
 
@@ -242,7 +243,14 @@ class ServerSideConnection(Connection):
     def active_block_range(self):
         return directed_range(self.block_range_start, self.block_range_end)
 
-    def packets(self):
+    def generate_next_repair_packet(self, block_id):
+        if block_id not in self.repair_packet_generators:
+            encoder = self.encoders[block_id]
+            self.repair_packet_generators[block_id] = encoder.repair_packets()
+
+        return block_id, next(self.repair_packet_generators[block_id])
+
+    def generate_packets(self):
         for block_id in self.active_block_range:
             # check in every outer iteration if we have received a stop signal in the meantime
             if block_id in self.acknowledged_blocks or block_id not in self.active_block_range:
@@ -257,8 +265,7 @@ class ServerSideConnection(Connection):
                 yield block_id, fec_data
 
         # preemptive repair phase, send repair packets is round robin until everything has been acknowledged
-        logger.debug('Exhausted source packets, generating repair packets')
-        repair_packet_generators = dict()  # block_id -> repair packet iterator
+        logger.debug('Exhausted source packets, starting preemptive repair phase')
         while True:
             repair_packets_generated = 0
             for block_id in self.active_block_range:
@@ -266,12 +273,8 @@ class ServerSideConnection(Connection):
                 if block_id in self.acknowledged_blocks or block_id not in self.active_block_range:
                     continue
 
-                if block_id not in repair_packet_generators:
-                    encoder = self.encoders[block_id]
-                    repair_packet_generators[block_id] = encoder.repair_packets()
-
                 # generate next repair packet
-                yield block_id, next(repair_packet_generators[block_id])
+                yield self.generate_next_repair_packet(block_id)
                 repair_packets_generated += 1
 
             if repair_packets_generated == 0:
@@ -282,7 +285,7 @@ class ServerSideConnection(Connection):
 
     async def send_blocks(self):
         try:
-            packet_iter = self.packets()
+            packet_generator = self.generate_packets()
             sequence_number = SequenceNumber(0)
             send_time = Timestamp.now()
             while True:
@@ -294,7 +297,7 @@ class ServerSideConnection(Connection):
                     await trio.sleep(SCHEDULING_GRANULARITY)
                 else:
                     try:
-                        block_id, fec_data = next(packet_iter)
+                        block_id, fec_data = next(packet_generator)
                     except StopIteration:
                         break  # all source packets have been sent
                     else:
