@@ -72,7 +72,6 @@ async def fetch(resource_id, server_addresses):
                 del connections[reverse_direction]
 
             async def write_block(block_id, received_block):
-                # TODO: maybe need to reverse received blocks if reversed=True
                 blocks[block_id - 1] = received_block  # block ids start at 1
 
                 if (not reverse_direction) in connections:

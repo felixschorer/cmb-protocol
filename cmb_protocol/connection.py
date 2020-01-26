@@ -74,7 +74,8 @@ class ClientSideConnection(Connection):
 
         self.block_range_start = last_block_id if self.reverse else 1  # inclusive
         self.block_range_end = 0 if self.reverse else last_block_id + 1  # exclusive
-        self.acknowledged_blocks = set()
+
+        self.acknowledged_blocks = dict()  # block_id -> time of acknowledgement
 
         self.head_of_line_blocked = set()  # block_ids
         self.opposite_head_of_line_blocked = set()  # block_ids
@@ -157,21 +158,31 @@ class ClientSideConnection(Connection):
         self.rtt = rtt_sample if self.rtt is None else 0.9 * self.rtt + 0.1 * rtt_sample
         logger.debug('Measured RTT: %f', self.rtt)
 
-        if packet.block_id in self.active_block_range:
+        if packet.block_id in self.active_block_range and packet.block_id not in self.acknowledged_blocks:
             if packet.block_id not in self.decoders:
                 _, resource_length = self.resource_id
                 block_size = calculate_block_size(resource_length, packet.block_id)
                 self.decoders[packet.block_id] = Decoder(block_size, MAXIMUM_TRANSMISSION_UNIT)
 
-            # TODO: decode only if we have enough packets
             decoded_block = self.decoders[packet.block_id].decode([packet.fec_data])
 
             if decoded_block:
+                del self.decoders[packet.block_id]
+
                 self.advance_head_of_line(packet.block_id)
-                await self.write_block(packet.block_id, decoded_block)
+                self.acknowledged_blocks[packet.block_id] = Timestamp.now()
+
                 await self.send(AckBlock(block_id=packet.block_id))
+                await self.write_block(packet.block_id, decoded_block)
+
                 if self.block_range_start == self.block_range_end:
                     self.shutdown()
+
+        elif packet.block_id in self.acknowledged_blocks \
+                and Timestamp.now() - self.acknowledged_blocks[packet.block_id] > 4 * self.rtt:
+            # acknowledgement got lost
+            self.acknowledged_blocks[packet.block_id] = Timestamp.now()
+            await self.send(AckBlock(block_id=packet.block_id))
 
     def handle_error(self, packet):
         # TODO: error handling?
@@ -243,6 +254,27 @@ class ServerSideConnection(Connection):
 
                 yield block_id, fec_data
 
+        # preemptive repair phase, send repair packets is round robin until everything has been acknowledged
+        repair_packet_iters = dict()  # block_id -> repair packet iterator
+        while True:
+            repair_packets_sent = 0
+            for block_id in self.active_block_range:
+                # check if we have received a stop signal in the meantime
+                if block_id in self.acknowledged_blocks or block_id not in self.active_block_range:
+                    continue
+
+                if block_id not in repair_packet_iters:
+                    encoder = self.encoders[block_id]
+                    repair_packet_iters[block_id] = encoder.repair_packets()
+
+                # generate next repair packet
+                yield block_id, next(repair_packet_iters[block_id])
+                repair_packets_sent += 1
+
+            if repair_packets_sent == 0:
+                # all blocks have been acknowledged
+                return
+
     async def send_blocks(self):
         try:
             packet_iter = self.packets()
@@ -269,7 +301,6 @@ class ServerSideConnection(Connection):
                         await self.send(packet)
                         sequence_number += 1
                         send_time += SEGMENT_SIZE / self.sending_rate
-            # TODO: enter preemptive repair phase
         finally:
             self.shutdown()
 
