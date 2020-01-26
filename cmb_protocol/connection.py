@@ -133,13 +133,15 @@ class ClientSideConnection(Connection):
             return False
 
     def advance_opposite_head_of_line(self, block_id):
+        def _last_block_id():
+            return self.block_range_end + 1 if self.reverse else self.block_range_end - 1
+
         if block_id <= self.block_range_end if self.reverse else block_id >= self.block_range_end:
             return False
-        elif block_id == (self.block_range_end + 1 if self.reverse else self.block_range_end - 1):
+        elif block_id == _last_block_id():
             self.block_range_end += 1 if self.reverse else -1
-            while (self.block_range_end + 1 if self.reverse else self.block_range_end - 1) \
-                    in self.opposite_head_of_line_blocked:
-                self.opposite_head_of_line_blocked.remove(self.block_range_end)
+            while _last_block_id() in self.opposite_head_of_line_blocked:
+                self.opposite_head_of_line_blocked.remove(_last_block_id())
                 self.block_range_end += 1 if self.reverse else -1
 
             # safeguard against overshooting the range start
@@ -255,25 +257,28 @@ class ServerSideConnection(Connection):
                 yield block_id, fec_data
 
         # preemptive repair phase, send repair packets is round robin until everything has been acknowledged
-        repair_packet_iters = dict()  # block_id -> repair packet iterator
+        logger.debug('Exhausted source packets, generating repair packets')
+        repair_packet_generators = dict()  # block_id -> repair packet iterator
         while True:
-            repair_packets_sent = 0
+            repair_packets_generated = 0
             for block_id in self.active_block_range:
                 # check if we have received a stop signal in the meantime
                 if block_id in self.acknowledged_blocks or block_id not in self.active_block_range:
                     continue
 
-                if block_id not in repair_packet_iters:
+                if block_id not in repair_packet_generators:
                     encoder = self.encoders[block_id]
-                    repair_packet_iters[block_id] = encoder.repair_packets()
+                    repair_packet_generators[block_id] = encoder.repair_packets()
 
                 # generate next repair packet
-                yield block_id, next(repair_packet_iters[block_id])
-                repair_packets_sent += 1
+                yield block_id, next(repair_packet_generators[block_id])
+                repair_packets_generated += 1
 
-            if repair_packets_sent == 0:
+            if repair_packets_generated == 0:
                 # all blocks have been acknowledged
                 return
+            else:
+                logger.debug('Generated %d repair packets', repair_packets_generated)
 
     async def send_blocks(self):
         try:

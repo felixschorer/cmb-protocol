@@ -62,15 +62,15 @@ async def run_accept_loop(udp_sock, resource_id, encoders):
 async def serve(addresses, resource_id, encoders):
     async with trio.open_nursery() as nursery:
         for address in addresses:
-            async def _serve():
-                log_util.set_listen_address(address)
+            async def _serve(listen_address):
+                log_util.set_listen_address(listen_address)
 
-                with socket.socket(family=get_ip_family(address), type=socket.SOCK_DGRAM) as udp_sock:
-                    await udp_sock.bind(address)
+                with socket.socket(family=get_ip_family(listen_address), type=socket.SOCK_DGRAM) as udp_sock:
+                    await udp_sock.bind(listen_address)
                     logger.info('Started listening')
                     await run_accept_loop(udp_sock, resource_id, encoders)
 
-            nursery.start_soon(_serve)
+            nursery.start_soon(_serve, address)
 
 
 def run(file_reader, addresses):
