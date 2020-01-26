@@ -1,8 +1,10 @@
 import struct
 from abc import ABCMeta, ABC, abstractmethod
-from enum import unique, Enum, IntFlag, IntEnum
+from enum import unique, Enum, IntEnum
 
 from cmb_protocol.helpers import unpack_uint48, pack_uint48
+from cmb_protocol.sequencenumber import SequenceNumber
+from cmb_protocol.timestamp import Timestamp
 
 
 class _PacketMeta(ABCMeta):
@@ -63,7 +65,7 @@ class Packet(ABC, metaclass=_PacketMeta):
 
 
 @unique
-class RequestResourceFlags(IntFlag):
+class RequestResourceFlags(IntEnum):
     NONE = 0
     REVERSE = 1
 
@@ -77,7 +79,6 @@ class RequestResource(Packet):
 
     def __init__(self, flags, resource_id, block_offset):
         super().__init__()
-        assert isinstance(flags, RequestResourceFlags)
         self.flags = flags
         self.resource_id = resource_id
         self.block_offset = block_offset
@@ -90,39 +91,51 @@ class RequestResource(Packet):
     @classmethod
     def _parse_fields(cls, packet_bytes):
         flags, reserved, resource_hash, resource_length, block_offset = struct.unpack(cls.__format, packet_bytes)
-        return RequestResource(flags=RequestResourceFlags(flags),
+        return RequestResource(flags=flags,
                                resource_id=(resource_hash, resource_length),
                                block_offset=block_offset)
 
 
 class Data(Packet):
-    __slots__ = 'block_id', 'timestamp', 'fec_data'
+    __slots__ = 'block_id', 'timestamp', 'estimated_rtt', 'sequence_number', 'fec_data'
 
     _packet_type_ = 0xcb01
 
-    __format = '!6sI'
-    __format_size = struct.calcsize(__format)
+    __format = '!6s3sH3s'
+    HEADER_SIZE = struct.calcsize(__format)
 
-    def __init__(self, block_id, timestamp, fec_data):
+    def __init__(self, block_id, timestamp, estimated_rtt, sequence_number, fec_data):
         super().__init__()
         self.block_id = block_id
         self.fec_data = fec_data
+        assert isinstance(timestamp, Timestamp)
         self.timestamp = timestamp
+        self.estimated_rtt = estimated_rtt
+        assert isinstance(sequence_number, SequenceNumber)
+        self.sequence_number = sequence_number
 
     def _serialize_fields(self):
-        return struct.pack(self.__format, pack_uint48(self.block_id), self.timestamp) + self.fec_data
+        values = pack_uint48(self.block_id), \
+                 self.timestamp.to_bytes(), \
+                 int(self.estimated_rtt * 1000), \
+                 self.sequence_number.to_bytes()
+        return struct.pack(self.__format, *values) + self.fec_data
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
-        block_id, timestamp = struct.unpack(cls.__format, packet_bytes[:cls.__format_size])
-        fec_data = packet_bytes[cls.__format_size:]
-        return Data(block_id=unpack_uint48(block_id), timestamp=timestamp, fec_data=fec_data)
+        header, fec_data = packet_bytes[:cls.HEADER_SIZE], packet_bytes[cls.HEADER_SIZE:]
+        block_id, timestamp, estimated_rtt, sequence_number = struct.unpack(cls.__format, header)
+        return Data(block_id=unpack_uint48(block_id),
+                    timestamp=Timestamp.from_bytes(timestamp),
+                    estimated_rtt=estimated_rtt / 1000,
+                    sequence_number=SequenceNumber.from_bytes(sequence_number),
+                    fec_data=fec_data)
 
 
 class AckBlock(Packet):
-    __slots__ = 'block_id'
+    __slots__ = 'block_id',
 
-    _packet_type_ = 0xcb03
+    _packet_type_ = 0xcb02
 
     __format = '!6s'
 
@@ -142,7 +155,7 @@ class AckBlock(Packet):
 class NackBlock(Packet):
     __slots__ = 'block_id', 'received_packets'
 
-    _packet_type_ = 0xcb05
+    _packet_type_ = 0xcb03
 
     __format = '!6sH'
 
@@ -163,7 +176,7 @@ class NackBlock(Packet):
 class AckOppositeRange(Packet):
     __slots__ = 'stop_at_block_id',
 
-    _packet_type_ = 0xcb06
+    _packet_type_ = 0xcb04
 
     __format = '!6s'
 
@@ -186,9 +199,9 @@ class ErrorCode(IntEnum):
 
 
 class Error(Packet):
-    __slots__ = 'error_code'
+    __slots__ = 'error_code',
 
-    _packet_type_ = 0xcb07
+    _packet_type_ = 0xcb05
 
     __format = '!H'
 
@@ -206,6 +219,38 @@ class Error(Packet):
         return Error(error_code=ErrorCode(error_code))
 
 
+class Feedback(Packet):
+    __slots__ = 'delay', 'timestamp', 'receive_rate', 'loss_event_rate'
+
+    _packet_type_ = 0xcb06
+
+    __format = '!H3s1sIf'
+
+    def __init__(self, delay, timestamp, receive_rate, loss_event_rate):
+        super().__init__()
+        self.delay = delay
+        assert isinstance(timestamp, Timestamp)
+        self.timestamp = timestamp
+        self.receive_rate = receive_rate
+        self.loss_event_rate = loss_event_rate
+
+    def _serialize_fields(self):
+        values = int(self.delay * 1000), \
+                 self.timestamp.to_bytes(), \
+                 bytes(1), \
+                 int(self.receive_rate), \
+                 self.loss_event_rate
+        return struct.pack(self.__format, *values)
+
+    @classmethod
+    def _parse_fields(cls, packet_bytes):
+        delay, timestamp, reserved, receive_rate, loss_event_rate = struct.unpack(cls.__format, packet_bytes)
+        return Feedback(delay=delay / 1000,
+                        timestamp=Timestamp.from_bytes(timestamp),
+                        receive_rate=receive_rate,
+                        loss_event_rate=loss_event_rate)
+
+
 @unique
 class PacketType(Enum):
     """
@@ -218,6 +263,7 @@ class PacketType(Enum):
     NACK_BLOCK = NackBlock
     ACK_OPPOSITE_RANGE = AckOppositeRange
     ERROR = Error
+    FEEDBACK = Feedback
 
     def __new__(cls, packet_cls):
         assert issubclass(packet_cls, Packet)

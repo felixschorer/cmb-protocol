@@ -1,6 +1,8 @@
 from sys import maxsize
 from raptorq import SourceBlockEncoder, SourceBlockDecoder
 
+RAPTORQ_HEADER_SIZE = 4
+
 
 class Encoder:
     def __init__(self, data, symbol_size):
