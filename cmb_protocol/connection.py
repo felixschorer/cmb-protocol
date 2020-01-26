@@ -6,8 +6,7 @@ from cmb_protocol import log_util
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size
 from cmb_protocol.helpers import is_reversed, directed_range
-from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, ShrinkRange, Data, \
-    Error, ErrorCode, Packet
+from cmb_protocol.packets import RequestResource, AckBlock, NackBlock, ShrinkRange, Data, Error, ErrorCode, Packet
 from cmb_protocol.sequence_number import SequenceNumber
 from cmb_protocol.timestamp import Timestamp
 
@@ -120,6 +119,13 @@ class ClientSideConnection(Connection):
             while self.block_range_start in self.head_of_line_blocked:
                 self.head_of_line_blocked.remove(self.block_range_start)
                 self.block_range_start += -1 if self.reverse else 1
+
+            # safeguard against overshooting the range end
+            self.block_range_start = \
+                max(self.block_range_start, self.block_range_end) \
+                if self.reverse else \
+                min(self.block_range_start, self.block_range_end)
+
             return True
         else:
             self.head_of_line_blocked.add(block_id)
@@ -129,11 +135,18 @@ class ClientSideConnection(Connection):
         if block_id <= self.block_range_end if self.reverse else block_id >= self.block_range_end:
             return False
         elif block_id == (self.block_range_end + 1 if self.reverse else self.block_range_end - 1):
-            self.block_range_start += 1 if self.reverse else -1
+            self.block_range_end += 1 if self.reverse else -1
             while (self.block_range_end + 1 if self.reverse else self.block_range_end - 1) \
                     in self.opposite_head_of_line_blocked:
                 self.opposite_head_of_line_blocked.remove(self.block_range_end)
                 self.block_range_end += 1 if self.reverse else -1
+
+            # safeguard against overshooting the range start
+            self.block_range_end = \
+                min(self.block_range_start, self.block_range_end) \
+                if self.reverse else \
+                max(self.block_range_start, self.block_range_end)
+
             return True
         else:
             self.opposite_head_of_line_blocked.add(block_id)
@@ -157,8 +170,7 @@ class ClientSideConnection(Connection):
                 self.advance_head_of_line(packet.block_id)
                 await self.write_block(packet.block_id, decoded_block)
                 await self.send(AckBlock(block_id=packet.block_id))
-                if self.block_range_start == self.block_range_end \
-                        or self.reverse != is_reversed(self.block_range_start, self.block_range_end):
+                if self.block_range_start == self.block_range_end:
                     self.shutdown()
 
     def handle_error(self, packet):
@@ -182,8 +194,7 @@ class ClientSideConnection(Connection):
         """
         if self.advance_opposite_head_of_line(block_id):
             await self.send(ShrinkRange(block_range_start=self.block_range_start, block_range_end=self.block_range_end))
-        if self.block_range_start == self.block_range_end \
-                or self.reverse != is_reversed(self.block_range_start, self.block_range_end):
+        if self.block_range_start == self.block_range_end:
             self.shutdown()
 
 
