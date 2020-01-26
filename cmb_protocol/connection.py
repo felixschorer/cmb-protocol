@@ -5,8 +5,8 @@ import trio
 from cmb_protocol import log_util
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size
-from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, ShrinkRange, Data, \
-    Error, ErrorCode, Packet
+from cmb_protocol.helpers import is_reversed, directed_range
+from cmb_protocol.packets import RequestResource, AckBlock, NackBlock, ShrinkRange, Data, Error, ErrorCode, Packet
 from cmb_protocol.sequence_number import SequenceNumber
 from cmb_protocol.timestamp import Timestamp
 
@@ -55,26 +55,30 @@ class Connection(ABC):
 
 
 class ClientSideConnection(Connection):
-    def __init__(self, shutdown, spawn, send, write_blocks, resource_id, reverse):
+    def __init__(self, shutdown, spawn, send, write_block, resource_id, reverse):
         """
         :param shutdown:     cf. Connection
         :param spawn:        cf. Connection
         :param send:         cf. Connection
-        :param write_blocks: async function for writing a consecutive range of block to the output
+        :param write_block:  async function for writing a block to the output
         :param resource_id:  the id of the resource
         :param reverse:      bool whether this connection should request the blocks in reverse order
         """
         super().__init__(shutdown, spawn, send)
-        self.write_blocks = write_blocks
+        self.write_block = write_block
         self.resource_id = resource_id
         self.reverse = reverse
 
         _, resource_length = self.resource_id
-        last_block_id = calculate_number_of_blocks(resource_length) - 1
+        last_block_id = calculate_number_of_blocks(resource_length)  # block id starts at 1
 
-        self.stop_after_block_id = 0 if self.reverse else last_block_id
-        self.offset = last_block_id if self.reverse else 0
+        self.block_range_start = last_block_id if self.reverse else 1  # inclusive
+        self.block_range_end = 0 if self.reverse else last_block_id + 1  # exclusive
 
+        self.acknowledged_blocks = dict()  # block_id -> time of acknowledgement
+
+        self.head_of_line_blocked = set()  # block_ids
+        self.opposite_head_of_line_blocked = set()  # block_ids
         self.decoders = dict()  # block_id -> decoder
 
         self.rtt = None
@@ -82,46 +86,107 @@ class ClientSideConnection(Connection):
 
         self.spawn(self.keep_connection_alive)
 
+    @property
+    def active_block_range(self):
+        return directed_range(self.block_range_start, self.block_range_end)
+
+    def shutdown(self):
+        super().shutdown()
+        self.cancel_scope.cancel()
+
     async def keep_connection_alive(self):
         with trio.CancelScope() as cancel_scope:
             self.cancel_scope = cancel_scope
             while True:
                 sending_rate = 500000  # TODO
-                flags = RequestResourceFlags.REVERSE if self.reverse else RequestResourceFlags.NONE
-                resource_request = RequestResource(flags=flags,
-                                                   timestamp=Timestamp.now(),
+                resource_request = RequestResource(timestamp=Timestamp.now(),
                                                    sending_rate=sending_rate,
+                                                   block_range_start=self.block_range_start,
                                                    resource_id=self.resource_id,
-                                                   block_offset=self.offset)
+                                                   block_range_end=self.block_range_end)
                 await self.send(resource_request)
                 min_interval = max(4 * SEGMENT_SIZE / sending_rate, SCHEDULING_GRANULARITY)
-                interval = MAXIMUM_HEARTBEAT_INTERVAL if self.rtt is None else max(min_interval, min(self.rtt, MAXIMUM_HEARTBEAT_INTERVAL))
+                interval = \
+                    MAXIMUM_HEARTBEAT_INTERVAL \
+                    if self.rtt is None else \
+                    max(min_interval, min(self.rtt, MAXIMUM_HEARTBEAT_INTERVAL))
                 await trio.sleep(interval)
+
+    def advance_head_of_line(self, block_id):
+        if block_id > self.block_range_start if self.reverse else block_id < self.block_range_start:
+            return False
+        elif block_id == self.block_range_start:
+            self.block_range_start += -1 if self.reverse else 1
+            while self.block_range_start in self.head_of_line_blocked:
+                self.head_of_line_blocked.remove(self.block_range_start)
+                self.block_range_start += -1 if self.reverse else 1
+
+            # safeguard against overshooting the range end
+            self.block_range_start = \
+                max(self.block_range_start, self.block_range_end) \
+                if self.reverse else \
+                min(self.block_range_start, self.block_range_end)
+
+            return True
+        else:
+            self.head_of_line_blocked.add(block_id)
+            return False
+
+    def advance_opposite_head_of_line(self, block_id):
+        def _last_block_id():
+            return self.block_range_end + 1 if self.reverse else self.block_range_end - 1
+
+        if block_id <= self.block_range_end if self.reverse else block_id >= self.block_range_end:
+            return False
+        elif block_id == _last_block_id():
+            self.block_range_end += 1 if self.reverse else -1
+            while _last_block_id() in self.opposite_head_of_line_blocked:
+                self.opposite_head_of_line_blocked.remove(_last_block_id())
+                self.block_range_end += 1 if self.reverse else -1
+
+            # safeguard against overshooting the range start
+            self.block_range_end = \
+                min(self.block_range_start, self.block_range_end) \
+                if self.reverse else \
+                max(self.block_range_start, self.block_range_end)
+
+            return True
+        else:
+            self.opposite_head_of_line_blocked.add(block_id)
+            return False
 
     async def handle_data(self, packet):
         rtt_sample = Timestamp.now() - packet.timestamp - packet.delay
         self.rtt = rtt_sample if self.rtt is None else 0.9 * self.rtt + 0.1 * rtt_sample
         logger.debug('Measured RTT: %f', self.rtt)
 
-        recent = packet.block_id <= self.offset if self.reverse else packet.block_id >= self.offset
-        if recent:
+        if packet.block_id in self.active_block_range and packet.block_id not in self.acknowledged_blocks:
             if packet.block_id not in self.decoders:
                 _, resource_length = self.resource_id
                 block_size = calculate_block_size(resource_length, packet.block_id)
                 self.decoders[packet.block_id] = Decoder(block_size, MAXIMUM_TRANSMISSION_UNIT)
 
-            # TODO: decode only if we have enough packets
-            decoded = self.decoders[packet.block_id].decode([packet.fec_data])
+            decoded_block = self.decoders[packet.block_id].decode([packet.fec_data])
 
-            if decoded:
-                # TODO: blocks could be decoded out of order
-                self.offset += -1 if self.reverse else 1
-                if self.stop_after_block_id == packet.block_id:
-                    self.shutdown()
+            if decoded_block:
+                del self.decoders[packet.block_id]
+
+                self.advance_head_of_line(packet.block_id)
+                self.acknowledged_blocks[packet.block_id] = Timestamp.now()
+
                 await self.send(AckBlock(block_id=packet.block_id))
-                await self.write_blocks(packet.block_id, [decoded])
+                await self.write_block(packet.block_id, decoded_block)
 
-    async def handle_error(self, packet):
+                if self.block_range_start == self.block_range_end:
+                    self.shutdown()
+
+        elif packet.block_id in self.acknowledged_blocks \
+                and Timestamp.now() - self.acknowledged_blocks[packet.block_id] > 4 * self.rtt:
+            # acknowledgement got lost
+            self.acknowledged_blocks[packet.block_id] = Timestamp.now()
+            await self.send(AckBlock(block_id=packet.block_id))
+
+    def handle_error(self, packet):
         # TODO: error handling?
         self.shutdown()
 
@@ -133,25 +198,17 @@ class ClientSideConnection(Connection):
         if isinstance(packet, Data):
             await self.handle_data(packet)
         elif isinstance(packet, Error):
-            await self.handle_error(packet)
+            self.handle_error(packet)
 
-    async def send_stop(self, stop_at_block_id):
+    async def send_stop(self, block_id):
         """
-        Called by the higher order protocol instance after receiving blocks from the opposing connection
-        :param stop_at_block_id: the block id at which the transmission should stop
+        Called by the higher order protocol instance after receiving a block from the opposing connection
+        :param block_id: the id of the block which has been received
         """
-        current, new = self.stop_after_block_id, stop_at_block_id + 1 if self.reverse else stop_at_block_id - 1
-        recent = current <= new if self.reverse else current >= new
-        if recent:
-            self.stop_after_block_id = new
-            finished = self.offset <= stop_at_block_id if self.reverse else self.offset >= stop_at_block_id
-            if finished:
-                self.shutdown()
-            await self.send(ShrinkRange(stop_at_block_id=stop_at_block_id))
-
-    def shutdown(self):
-        super().shutdown()
-        self.cancel_scope.cancel()
+        if self.advance_opposite_head_of_line(block_id):
+            await self.send(ShrinkRange(block_range_start=self.block_range_start, block_range_end=self.block_range_end))
+        if self.block_range_start == self.block_range_end:
+            self.shutdown()
 
 
 class ServerSideConnection(Connection):
@@ -167,46 +224,72 @@ class ServerSideConnection(Connection):
         super().__init__(shutdown, spawn, send)
         self.resource_id = resource_id
         self.encoders = encoders
-        self.unacknowlegded_blocks = set(encoders.keys())
+        self.repair_packet_generators = dict()  # block_id -> repair packet iterator
+        self.acknowledged_blocks = set()
         self.connected = False
-        self.reverse = None
 
-        self.recent_resource_request_received_at = None
-        self.recent_resource_request = None
+        self.block_range_start = None
+        self.block_range_end = None
+        self.sending_rate = None
+        self.recent_receiver_timestamp = None
 
-    async def handle_request_resource(self, packet):
-        self.recent_resource_request_received_at = Timestamp.now()
-        self.recent_resource_request = packet
+        self.keep_alive_received_at = None
 
-        if self.resource_id != packet.resource_id:
-            await self.send(Error(ErrorCode.RESOURCE_NOT_FOUND))
-            self.shutdown()
-        elif not self.connected:
-            self.reverse = bool(packet.flags & RequestResourceFlags.REVERSE)
-            self.connected = True
-            self.spawn(self.send_blocks)
-        else:
-            pass  # already connected and sending
+    @property
+    def block_range_reversed(self):
+        return self.connected and is_reversed(self.block_range_start, self.block_range_end)
 
-    def packets(self):
-        for block_id, encoder in reversed(self.encoders.items()) if self.reverse else self.encoders.items():
-            if block_id not in self.unacknowlegded_blocks:
+    @property
+    def active_block_range(self):
+        return directed_range(self.block_range_start, self.block_range_end)
+
+    def generate_next_repair_packet(self, block_id):
+        if block_id not in self.repair_packet_generators:
+            encoder = self.encoders[block_id]
+            self.repair_packet_generators[block_id] = encoder.repair_packets()
+
+        return block_id, next(self.repair_packet_generators[block_id])
+
+    def generate_packets(self):
+        for block_id in self.active_block_range:
+            # check in every outer iteration if we have received a stop signal in the meantime
+            if block_id in self.acknowledged_blocks or block_id not in self.active_block_range:
                 continue
 
+            encoder = self.encoders[block_id]
             for fec_data in encoder.source_packets():
-                # check in every iteration if we have received a stop signal in the meantime
-                if block_id not in self.unacknowlegded_blocks:
+                # check in every inner iteration if we have received a stop signal in the meantime
+                if block_id in self.acknowledged_blocks or block_id not in self.active_block_range:
                     break
 
                 yield block_id, fec_data
 
+        # preemptive repair phase, send repair packets is round robin until everything has been acknowledged
+        logger.debug('Exhausted source packets, starting preemptive repair phase')
+        while True:
+            repair_packets_generated = 0
+            for block_id in self.active_block_range:
+                # check if we have received a stop signal in the meantime
+                if block_id in self.acknowledged_blocks or block_id not in self.active_block_range:
+                    continue
+
+                # generate next repair packet
+                yield self.generate_next_repair_packet(block_id)
+                repair_packets_generated += 1
+
+            if repair_packets_generated == 0:
+                # all blocks have been acknowledged
+                return
+            else:
+                logger.debug('Generated %d repair packets', repair_packets_generated)
+
     async def send_blocks(self):
         try:
-            packet_iter = self.packets()
+            packet_generator = self.generate_packets()
             sequence_number = SequenceNumber(0)
             send_time = Timestamp.now()
             while True:
-                if Timestamp.now() - self.recent_resource_request_received_at > 4 * MAXIMUM_HEARTBEAT_INTERVAL:
+                if Timestamp.now() - self.keep_alive_received_at > 4 * MAXIMUM_HEARTBEAT_INTERVAL:
                     logger.debug('Connection timed out')
                     return  # connection is broken, shutdown
 
@@ -214,35 +297,66 @@ class ServerSideConnection(Connection):
                     await trio.sleep(SCHEDULING_GRANULARITY)
                 else:
                     try:
-                        block_id, fec_data = next(packet_iter)
+                        block_id, fec_data = next(packet_generator)
                     except StopIteration:
-                        return
+                        break  # all source packets have been sent
                     else:
                         packet = Data(block_id=block_id,
-                                      timestamp=self.recent_resource_request.timestamp,
-                                      delay=Timestamp.now() - self.recent_resource_request_received_at,
+                                      timestamp=self.recent_receiver_timestamp,
+                                      delay=Timestamp.now() - self.keep_alive_received_at,
                                       sequence_number=sequence_number,
                                       fec_data=fec_data)
                         await self.send(packet)
                         sequence_number += 1
-                        send_time += SEGMENT_SIZE / self.recent_resource_request.sending_rate
+                        send_time += SEGMENT_SIZE / self.sending_rate
         finally:
             self.shutdown()
 
-    async def handle_ack_block(self, packet):
-        if packet.block_id in self.unacknowlegded_blocks:
-            self.unacknowlegded_blocks.remove(packet.block_id)
+    def shrink_range(self, block_range_start, block_range_end):
+        block_range_reversed = is_reversed(block_range_start, block_range_end)
+        if block_range_start == block_range_end:
+            self.block_range_end = self.block_range_start = block_range_start
+        elif self.block_range_reversed and block_range_reversed:
+            if self.block_range_end < block_range_end:
+                self.block_range_end = block_range_end
+            if self.block_range_start > block_range_start:
+                self.block_range_start = block_range_start
+        elif not self.block_range_reversed and not block_range_reversed:
+            if self.block_range_start < block_range_start:
+                self.block_range_start = block_range_start
+            if self.block_range_end > block_range_end:
+                self.block_range_end = block_range_end
+        else:
+            logger.warning('Ranges [%d:%d) and [%d:%d) have opposing direction',
+                           self.block_range_start, self.block_range_end, block_range_start, block_range_end)
+        logger.debug('Set new range [%d, %d)', self.block_range_start, self.block_range_end)
 
-    async def handle_nack_block(self, packet):
+    async def handle_request_resource(self, packet):
+        if self.resource_id != packet.resource_id:
+            await self.send(Error(ErrorCode.RESOURCE_NOT_FOUND))
+            self.shutdown()
+            return
+
+        self.keep_alive_received_at = Timestamp.now()
+        self.sending_rate = packet.sending_rate
+        self.recent_receiver_timestamp = packet.timestamp
+
+        if not self.connected:
+            self.block_range_start = packet.block_range_start
+            self.block_range_end = packet.block_range_end
+            self.connected = True
+            self.spawn(self.send_blocks)
+        else:
+            self.shrink_range(packet.block_range_start, packet.block_range_end)
+
+    def handle_ack_block(self, packet):
+        self.acknowledged_blocks.add(packet.block_id)
+
+    def handle_nack_block(self, packet):
         pass
 
-    async def handle_ack_opposite_range(self, packet):
-        acknowledged_blocks = set(
-            range(0, packet.stop_at_block_id + 1)
-            if self.reverse else
-            range(packet.stop_at_block_id, len(self.encoders))
-        )
-        self.unacknowlegded_blocks.difference_update(acknowledged_blocks)
+    def handle_shrink_range(self, packet):
+        self.shrink_range(packet.block_range_start, packet.block_range_end)
 
     async def handle_packet(self, packet):
         """
@@ -252,11 +366,8 @@ class ServerSideConnection(Connection):
         if isinstance(packet, RequestResource):
             await self.handle_request_resource(packet)
         elif isinstance(packet, AckBlock):
-            await self.handle_ack_block(packet)
+            self.handle_ack_block(packet)
         elif isinstance(packet, NackBlock):
-            await self.handle_nack_block(packet)
+            self.handle_nack_block(packet)
         elif isinstance(packet, ShrinkRange):
-            await self.handle_ack_opposite_range(packet)
-
-    def shutdown(self):
-        super().shutdown()
+            self.handle_shrink_range(packet)

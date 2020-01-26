@@ -1,7 +1,6 @@
 import struct
 import trio
 import hashlib
-from collections import OrderedDict
 from functools import partial
 from trio import socket
 from cmb_protocol.coding import Encoder
@@ -43,7 +42,7 @@ async def run_accept_loop(udp_sock, resource_id, encoders):
         while True:
             try:
                 data, address = await udp_sock.recvfrom(2048)
-                log_util.set_remote_address(address)
+                log_util.set_remote_address(address[:2])
 
                 packet = PacketType.parse_packet(data)
             except (ConnectionResetError, ConnectionRefusedError):
@@ -63,31 +62,31 @@ async def run_accept_loop(udp_sock, resource_id, encoders):
 async def serve(addresses, resource_id, encoders):
     async with trio.open_nursery() as nursery:
         for address in addresses:
-            async def _serve():
-                log_util.set_listen_address(address)
+            async def _serve(listen_address):
+                log_util.set_listen_address(listen_address)
 
-                with socket.socket(family=get_ip_family(address), type=socket.SOCK_DGRAM) as udp_sock:
-                    await udp_sock.bind(address)
+                with socket.socket(family=get_ip_family(listen_address), type=socket.SOCK_DGRAM) as udp_sock:
+                    await udp_sock.bind(listen_address)
                     logger.info('Started listening')
                     await run_accept_loop(udp_sock, resource_id, encoders)
 
-            nursery.start_soon(_serve)
+            nursery.start_soon(_serve, address)
 
 
 def run(file_reader, addresses):
     md5 = hashlib.md5()
     resource_length = 0
-    encoders = OrderedDict()  # block_id -> encoder
+    encoders = dict()  # block_id -> encoder
 
     with file_reader:
         logger.debug('Reading from %s', file_reader.name)
 
         # split file into blocks
         block_size = MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK
-        for block_id, block_content in enumerate(iter(partial(file_reader.read, block_size), b'')):
+        for block_index, block_content in enumerate(iter(partial(file_reader.read, block_size), b'')):
             md5.update(block_content)
             resource_length += len(block_content)
-            encoders[block_id] = Encoder(block_content, MAXIMUM_TRANSMISSION_UNIT)
+            encoders[block_index + 1] = Encoder(block_content, MAXIMUM_TRANSMISSION_UNIT)  # block id starts at 1
 
     resource_hash = md5.digest()
     resource_id = (resource_hash, resource_length)
