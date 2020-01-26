@@ -3,7 +3,7 @@ from abc import ABCMeta, ABC, abstractmethod
 from enum import unique, Enum, IntEnum
 
 from cmb_protocol.helpers import unpack_uint48, pack_uint48
-from cmb_protocol.sequencenumber import SequenceNumber
+from cmb_protocol.sequence_number import SequenceNumber
 from cmb_protocol.timestamp import Timestamp
 
 
@@ -79,7 +79,7 @@ class RequestResource(Packet):
 
     def __init__(self, flags, timestamp, sending_rate, resource_id, block_offset):
         super().__init__()
-        assert issubclass(timestamp, Timestamp)
+        assert isinstance(timestamp, Timestamp)
         self.flags = flags
         self.timestamp = timestamp
         self.sending_rate = sending_rate
