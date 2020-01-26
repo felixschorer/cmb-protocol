@@ -2,17 +2,20 @@ from abc import ABC
 
 import trio
 
+from cmb_protocol import log_util
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size
 from cmb_protocol.packets import RequestResourceFlags, RequestResource, AckBlock, NackBlock, AckOppositeRange, Data, \
-    Error, ErrorCode, Packet, Feedback
-from cmb_protocol.tfrc import TFRCSender, TFRCReceiver
+    Error, ErrorCode, Packet
+from cmb_protocol.sequence_number import SequenceNumber
+from cmb_protocol.timestamp import Timestamp
 
-from cmb_protocol.trio_util import Timer
+
+logger = log_util.get_logger(__name__)
 
 
-# called s in TFRC, in bytes
 SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + Data.HEADER_SIZE + RAPTORQ_HEADER_SIZE + MAXIMUM_TRANSMISSION_UNIT
+MAXIMUM_HEARTBEAT_INTERVAL = 0.25
 
 
 class Connection(ABC):
@@ -73,37 +76,29 @@ class ClientSideConnection(Connection):
 
         self.decoders = dict()  # block_id -> decoder
 
-        self.tfrc = TFRCReceiver(SEGMENT_SIZE, Timer(self.spawn))
-        self.tfrc.feedback_handler += self.send_feedback
+        self.rtt = None
+        self.cancel_scope = None
 
-        self.connection_timout = Timer(self.spawn)
-        self.connection_timout += self.handle_connection_timeout
-
-        self.establish_connection_scope = None
         self.spawn(self.establish_connection)
 
     async def establish_connection(self):
         with trio.CancelScope() as cancel_scope:
-            self.establish_connection_scope = cancel_scope
+            self.cancel_scope = cancel_scope
             while True:
                 flags = RequestResourceFlags.REVERSE if self.reverse else RequestResourceFlags.NONE
                 resource_request = RequestResource(flags=flags,
+                                                   timestamp=Timestamp.now(),
+                                                   sending_rate=500000,  # TODO
                                                    resource_id=self.resource_id,
                                                    block_offset=self.offset)
                 await self.send(resource_request)
-                await trio.sleep(1)
-
-    def handle_connection_timeout(self, expired_early):
-        self.spawn(self.establish_connection)
+                interval = MAXIMUM_HEARTBEAT_INTERVAL if self.rtt is None else min(self.rtt, MAXIMUM_HEARTBEAT_INTERVAL)
+                await trio.sleep(interval)
 
     async def handle_data(self, packet):
-        self.connection_timout.reset(10)
-
-        self.tfrc.handle_data(packet.timestamp, packet.estimated_rtt, packet.sequence_number)
-
-        if self.establish_connection_scope is not None:
-            self.establish_connection_scope.cancel()
-            self.establish_connection_scope = None
+        rtt_sample = Timestamp.now() - packet.timestamp - packet.delay
+        self.rtt = rtt_sample if self.rtt is None else 0.9 * self.rtt + 0.1 * rtt_sample
+        logger.debug('Measured RTT: %f', self.rtt)
 
         recent = packet.block_id <= self.offset if self.reverse else packet.block_id >= self.offset
         if recent:
@@ -136,10 +131,6 @@ class ClientSideConnection(Connection):
         elif isinstance(packet, Error):
             await self.handle_error(packet)
 
-    def send_feedback(self, delay, timestamp, receive_rate, loss_event_rate):
-        self.spawn(self.send, Feedback(delay=delay, timestamp=timestamp, receive_rate=receive_rate,
-                                       loss_event_rate=loss_event_rate))
-
     async def send_stop(self, stop_at_block_id):
         """
         Called by the higher order protocol instance after receiving blocks from the opposing connection
@@ -156,8 +147,7 @@ class ClientSideConnection(Connection):
 
     def shutdown(self):
         super().shutdown()
-        self.tfrc.close()
-        self.connection_timout.clear_listeners()
+        self.cancel_scope.cancel()
 
 
 class ServerSideConnection(Connection):
@@ -177,13 +167,13 @@ class ServerSideConnection(Connection):
         self.reverse = None
         self.stop_at_block_id = None
 
-        self.tfrc = TFRCSender(SEGMENT_SIZE)
-
-    async def handle_feedback(self, packet):
-        params = packet.delay, packet.timestamp, packet.receive_rate, packet.loss_event_rate
-        self.tfrc.handle_feedback(*params)
+        self.recent_resource_request_received_at = None
+        self.recent_resource_request = None
 
     async def handle_request_resource(self, packet):
+        self.recent_resource_request_received_at = Timestamp.now()
+        self.recent_resource_request = packet
+
         if self.resource_id != packet.resource_id:
             await self.send(Error(ErrorCode.RESOURCE_NOT_FOUND))
             self.shutdown()
@@ -195,26 +185,40 @@ class ServerSideConnection(Connection):
         else:
             pass  # already connected and sending
 
+    def packets(self):
+        for block_id, encoder in reversed(self.encoders.items()) if self.reverse else self.encoders.items():
+            for fec_data in encoder.source_packets:
+                # check in every iteration if we have received a stop signal in the meantime
+                finished = self.stop_at_block_id >= block_id if self.reverse else self.stop_at_block_id <= block_id
+                if finished:
+                    return
+
+                yield block_id, fec_data
+
     async def send_blocks(self):
-        def packets():
-            for block_id, encoder in reversed(self.encoders.items()) if self.reverse else self.encoders.items():
-                for fec_data in encoder.source_packets:
-                    # check in every iteration if we have received a stop signal in the meantime
-                    finished = self.stop_at_block_id >= block_id if self.reverse else self.stop_at_block_id <= block_id
-                    if finished:
+        try:
+            packet_iter = self.packets()
+            sequence_number = SequenceNumber(0)
+            send_time = Timestamp.now()
+            while True:
+                if Timestamp.now() < send_time:
+                    await trio.sleep(1)
+                else:
+                    try:
+                        block_id, fec_data = next(packet_iter)
+                    except StopIteration:
                         return
-
-                    yield block_id, fec_data
-
-        packet_iter = packets()
-
-        async for timestamp, rtt, sequence_number in self.tfrc.sending_credits:
-            try:
-                block_id, fec_data = next(packet_iter)
-                packet = Data(block_id, timestamp, rtt, sequence_number, fec_data)
-                await self.send(packet)
-            except StopIteration:
-                return
+                    else:
+                        packet = Data(block_id=block_id,
+                                      timestamp=self.recent_resource_request.timestamp,
+                                      delay=Timestamp.now() - self.recent_resource_request_received_at,
+                                      sequence_number=sequence_number,
+                                      fec_data=fec_data)
+                        await self.send(packet)
+                        sequence_number += 1
+                        send_time += SEGMENT_SIZE / self.recent_resource_request.sending_rate
+        finally:
+            self.shutdown()
 
     async def handle_ack_block(self, packet):
         pass
@@ -241,9 +245,6 @@ class ServerSideConnection(Connection):
             await self.handle_nack_block(packet)
         elif isinstance(packet, AckOppositeRange):
             await self.handle_ack_opposite_range(packet)
-        elif isinstance(packet, Feedback):
-            await self.handle_feedback(packet)
 
     def shutdown(self):
         super().shutdown()
-        self.tfrc.close()
