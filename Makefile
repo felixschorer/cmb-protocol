@@ -1,8 +1,8 @@
 .PHONY: patch_ubuntu install_python install_rustup create_virtualenv install_dependencies compile_raptorq install clean
 
 patch_ubuntu: /etc/apt/sources.list
-	sudo sed -i 's/de.archive/old-releases/g' /etc/apt/sources.list
-	sudo sed -i 's/security/old-releases/g' /etc/apt/sources.list
+	sudo sed -i 's/http:\/\/de.archive/http:\/\/old-releases/g' /etc/apt/sources.list
+	sudo sed -i 's/http:\/\/security/http:\/\/old-releases/g' /etc/apt/sources.list
 
 install_python: .make.install_python
 
