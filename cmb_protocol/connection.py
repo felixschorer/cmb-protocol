@@ -1,6 +1,7 @@
 from abc import ABC
 
 import trio
+from recordclass import recordclass
 
 from cmb_protocol import log_util
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
@@ -57,6 +58,8 @@ class Connection(ABC):
 
 
 class ClientSideConnection(Connection):
+    NotAcknowledgedBlock = recordclass('NotAcknowledgedBlock', ['packets_received', 'decoder', 'nack_timestamp'])
+
     def __init__(self, shutdown, spawn, send, write_block, resource_id, reverse):
         """
         :param shutdown:     cf. Connection
@@ -77,11 +80,11 @@ class ClientSideConnection(Connection):
         self.block_range_start = last_block_id if self.reverse else 1  # inclusive
         self.block_range_end = 0 if self.reverse else last_block_id + 1  # exclusive
 
-        self.acknowledged_blocks = dict()  # block_id -> time of acknowledgement
+        self.acknowledged_blocks = dict()  # block_id -> time of ACK sent
+        self.not_acknowledged_blocks = dict()  # block_id -> (#packets received, decoder, time of NACK sent)
 
         self.head_of_line_blocked = set()  # block_ids
         self.opposite_head_of_line_blocked = set()  # block_ids
-        self.decoders = dict()  # block_id -> decoder
 
         self.rtt = None
         self.cancel_scope = None
@@ -162,15 +165,19 @@ class ClientSideConnection(Connection):
         logger.debug('Measured RTT: %f', self.rtt)
 
         if packet.block_id in self.active_block_range and packet.block_id not in self.acknowledged_blocks:
-            if packet.block_id not in self.decoders:
+            if packet.block_id not in self.not_acknowledged_blocks:
                 _, resource_length = self.resource_id
                 block_size = calculate_block_size(resource_length, packet.block_id)
-                self.decoders[packet.block_id] = Decoder(block_size, MAXIMUM_TRANSMISSION_UNIT)
+                decoder = Decoder(block_size, MAXIMUM_TRANSMISSION_UNIT)
+                self.not_acknowledged_blocks[packet.block_id] = \
+                    self.NotAcknowledgedBlock(packets_received=0, decoder=decoder, nack_timestamp=None)
 
-            decoded_block = self.decoders[packet.block_id].decode([packet.fec_data])
+            # TODO trigger NACKs
+            self.not_acknowledged_blocks[packet.block_id].packets_received += 1
+            decoded_block = self.not_acknowledged_blocks[packet.block_id].decoder.decode([packet.fec_data])
 
             if decoded_block:
-                del self.decoders[packet.block_id]
+                del self.not_acknowledged_blocks[packet.block_id]
 
                 self.advance_head_of_line(packet.block_id)
                 self.acknowledged_blocks[packet.block_id] = Timestamp.now()
