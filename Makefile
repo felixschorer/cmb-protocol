@@ -27,7 +27,7 @@ clean:
 	touch .make.install_python
 
 .make.install_rustup:
-	source ~/.bashrc
+	. ~/.bashrc
 	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 	cd raptorq
 	rustup install nightly
