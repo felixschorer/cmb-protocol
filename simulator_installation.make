@@ -1,7 +1,10 @@
 patch_ubuntu:
+	sudo sed -i 's/de.archive/old-releases/g' /etc/apt/sources.list
+	sudo sed -i 's/security/old-releases/g' /etc/apt/sources.list
+	sudo apt-get update
 
 install_python: patch_ubuntu
-	sudo apt install python3-dev python3-pip
+	sudo apt-get install python3-dev python3-pip
 
 install_rustup:
 	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
