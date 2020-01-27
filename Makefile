@@ -10,7 +10,7 @@ install_dependencies: .make.create_virtualenv requirements.txt
 	. venv/bin/activate && python3 -m pip install -r requirements.txt
 
 compile_raptorq: .make.install_rustup .make.create_virtualenv install_dependencies $(shell find raptorq/src -type f) raptorq/Cargo.toml
-	. venv/bin/activate && cd raptorq && maturin develop --release
+	. venv/bin/activate && export PATH=$$PATH:$$HOME/.cargo/bin && cd raptorq && maturin develop --release
 
 install: install_dependencies compile_raptorq
 
@@ -26,7 +26,6 @@ clean:
 
 .make.install_rustup:
 	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-	cd raptorq
 	export PATH=$$PATH:$$HOME/.cargo/bin && rustup install nightly && rustup override set nightly
 	touch .make.install_rustup
 
