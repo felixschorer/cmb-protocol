@@ -1,11 +1,14 @@
 from abc import ABC
+from collections import namedtuple
+from heapq import heappush, heappop
 
 import trio
+from recordclass import recordclass
 
 from cmb_protocol import log_util
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size, \
-    SENDING_RATE
+    SENDING_RATE, HEARTBEAT_INTERVAL, SCHEDULING_GRANULARITY
 from cmb_protocol.helpers import is_reversed, directed_range, format_resource_id
 from cmb_protocol.log_util import get_logging_context
 from cmb_protocol.packets import RequestResource, AckBlock, NackBlock, ShrinkRange, Data, Error, ErrorCode, Packet
@@ -17,8 +20,6 @@ logger = log_util.get_logger(__name__)
 
 
 SEGMENT_SIZE = Packet.PACKET_TYPE_SIZE + Data.HEADER_SIZE + RAPTORQ_HEADER_SIZE + MAXIMUM_TRANSMISSION_UNIT
-MAXIMUM_HEARTBEAT_INTERVAL = 0.25
-SCHEDULING_GRANULARITY = 0.001
 
 
 class Connection(ABC):
@@ -56,6 +57,9 @@ class Connection(ABC):
         await self._send(packet)
 
 
+BlockMetadata = recordclass('BlockMetadata', ['packets_received', 'decoder', 'nack_timestamp'])
+
+
 class ClientSideConnection(Connection):
     def __init__(self, shutdown, spawn, send, write_block, resource_id, reverse):
         """
@@ -77,11 +81,13 @@ class ClientSideConnection(Connection):
         self.block_range_start = last_block_id if self.reverse else 1  # inclusive
         self.block_range_end = 0 if self.reverse else last_block_id + 1  # exclusive
 
-        self.acknowledged_blocks = dict()  # block_id -> time of acknowledgement
+        self.acknowledged_blocks = dict()  # block_id -> time of ACK sent
+        self.not_acknowledged_blocks = dict()  # block_id -> (#packets received, decoder, time of NACK sent)
 
         self.head_of_line_blocked = set()  # block_ids
         self.opposite_head_of_line_blocked = set()  # block_ids
-        self.decoders = dict()  # block_id -> decoder
+
+        self.sending_rate = SENDING_RATE  # TODO
 
         self.rtt = None
         self.cancel_scope = None
@@ -101,17 +107,39 @@ class ClientSideConnection(Connection):
             self.cancel_scope = cancel_scope
             while True:
                 resource_request = RequestResource(timestamp=Timestamp.now(),
-                                                   sending_rate=SENDING_RATE,
+                                                   sending_rate=self.sending_rate,
                                                    block_range_start=self.block_range_start,
                                                    resource_id=self.resource_id,
                                                    block_range_end=self.block_range_end)
                 await self.send(resource_request)
-                min_interval = max(4 * SEGMENT_SIZE / SENDING_RATE, SCHEDULING_GRANULARITY)
-                interval = \
-                    MAXIMUM_HEARTBEAT_INTERVAL \
-                    if self.rtt is None else \
-                    max(min_interval, min(self.rtt, MAXIMUM_HEARTBEAT_INTERVAL))
-                await trio.sleep(interval)
+                await trio.sleep(HEARTBEAT_INTERVAL)
+
+    async def check_could_decode_previous(self, block_id):
+        block_metadata = self.not_acknowledged_blocks[block_id]
+        async with trio.open_nursery() as nursery:
+            for previous_block_id in directed_range(self.block_range_start, block_id):
+                if previous_block_id not in self.not_acknowledged_blocks:
+                    # did decode block already, block is head of line blocked
+                    continue
+
+                distance = abs(block_id - previous_block_id)  # if reversed, difference might be negative
+                if distance < 2 and block_metadata.packets_received < 3:
+                    # does not fulfill packet loss criteria
+                    continue
+
+                inter_packet_arrival_time = SEGMENT_SIZE / self.sending_rate
+                # add inter packet arrival time in case the sender is sending less than 1 packet every 4 RTTs
+                nack_resend_timeout = 4 * self.rtt + inter_packet_arrival_time
+                previous_block_metadata = self.not_acknowledged_blocks[previous_block_id]
+                if previous_block_metadata.nack_timestamp is not None \
+                        and Timestamp.now() - previous_block_metadata.nack_timestamp < nack_resend_timeout:
+                    # did send nack recently
+                    continue
+
+                previous_block_metadata.nack_timestamp = Timestamp.now()
+                nursery.start_soon(self.send, NackBlock(block_id=previous_block_id,
+                                                        received_packets=previous_block_metadata.packets_received))
+                logger.debug('Sent NACK %d', previous_block_id)
 
     def advance_head_of_line(self, block_id):
         if block_id > self.block_range_start if self.reverse else block_id < self.block_range_start:
@@ -159,23 +187,33 @@ class ClientSideConnection(Connection):
     async def handle_data(self, packet):
         rtt_sample = Timestamp.now() - packet.timestamp - packet.delay
         self.rtt = rtt_sample if self.rtt is None else 0.9 * self.rtt + 0.1 * rtt_sample
-        logger.debug('Measured RTT: %f', self.rtt)
 
         if packet.block_id in self.active_block_range and packet.block_id not in self.acknowledged_blocks:
-            if packet.block_id not in self.decoders:
+            if packet.block_id not in self.not_acknowledged_blocks:
                 _, resource_length = self.resource_id
                 block_size = calculate_block_size(resource_length, packet.block_id)
-                self.decoders[packet.block_id] = Decoder(block_size, MAXIMUM_TRANSMISSION_UNIT)
+                decoder = Decoder(block_size, MAXIMUM_TRANSMISSION_UNIT)
+                block_metadata = BlockMetadata(packets_received=0, decoder=decoder, nack_timestamp=None)
+                self.not_acknowledged_blocks[packet.block_id] = block_metadata
 
-            decoded_block = self.decoders[packet.block_id].decode([packet.fec_data])
+            block_metadata = self.not_acknowledged_blocks[packet.block_id]
+
+            # update packet counter and reset nack send timeout
+            block_metadata.packets_received += 1
+            block_metadata.nack_timestamp = Timestamp.now()
+
+            decoded_block = block_metadata.decoder.decode([packet.fec_data])
+
+            await self.check_could_decode_previous(packet.block_id)
 
             if decoded_block:
-                del self.decoders[packet.block_id]
+                del self.not_acknowledged_blocks[packet.block_id]
 
                 self.advance_head_of_line(packet.block_id)
                 self.acknowledged_blocks[packet.block_id] = Timestamp.now()
 
                 await self.send(AckBlock(block_id=packet.block_id))
+                logger.debug('Sent ACK %d', packet.block_id)
                 await self.write_block(packet.block_id, decoded_block)
 
                 if self.block_range_start == self.block_range_end:
@@ -186,6 +224,7 @@ class ClientSideConnection(Connection):
             # acknowledgement got lost
             self.acknowledged_blocks[packet.block_id] = Timestamp.now()
             await self.send(AckBlock(block_id=packet.block_id))
+            logger.debug('Sent duplicate ACK %d', packet.block_id)
 
     def handle_error(self, packet):
         if ErrorCode.RESOURCE_NOT_FOUND == packet.error_code:
@@ -213,8 +252,10 @@ class ClientSideConnection(Connection):
             self.shutdown()
 
 
-class ServerSideConnection(Connection):
+PendingNack = namedtuple('PendingNack', ['block_id', 'repair_count'])
 
+
+class ServerSideConnection(Connection):
     def __init__(self, shutdown, spawn, send, resource_id, encoders):
         """
         :param shutdown:     cf. Connection
@@ -236,6 +277,9 @@ class ServerSideConnection(Connection):
         self.recent_receiver_timestamp = None
 
         self.keep_alive_received_at = None
+
+        self.nack_heap = []  # defines nack processing order
+        self.pending_nacks = set()  # block_id
 
     @property
     def block_range_reversed(self):
@@ -268,6 +312,9 @@ class ServerSideConnection(Connection):
 
         # preemptive repair phase, send repair packets is round robin until everything has been acknowledged
         logger.debug('Exhausted source packets, starting preemptive repair phase')
+        yield from self.generate_preemptive_repair_packets()
+
+    def generate_preemptive_repair_packets(self):
         while True:
             repair_packets_generated = 0
             for block_id in self.active_block_range:
@@ -285,13 +332,32 @@ class ServerSideConnection(Connection):
             else:
                 logger.debug('Generated %d repair packets', repair_packets_generated)
 
+    def generate_repair_packets(self):
+        while True:
+            if len(self.nack_heap) > 0:
+                _, (block_id, repair_count) = self.nack_heap[0]
+
+                for _ in range(repair_count):
+                    # check if we have received a stop signal in the meantime
+                    if block_id in self.acknowledged_blocks or block_id not in self.active_block_range:
+                        break
+
+                    yield self.generate_next_repair_packet(block_id)
+
+                heappop(self.nack_heap)
+                self.pending_nacks.remove(block_id)
+                logger.debug('Sent repair %d', block_id)
+            else:
+                yield None, None
+
     async def send_blocks(self):
         try:
             packet_generator = self.generate_packets()
+            repair_packet_generator = self.generate_repair_packets()
             sequence_number = SequenceNumber(0)
             send_time = Timestamp.now()
             while True:
-                if Timestamp.now() - self.keep_alive_received_at > 4 * MAXIMUM_HEARTBEAT_INTERVAL:
+                if Timestamp.now() - self.keep_alive_received_at > 4 * HEARTBEAT_INTERVAL:
                     logger.debug('Connection timed out')
                     return  # connection is broken, shutdown
 
@@ -299,7 +365,9 @@ class ServerSideConnection(Connection):
                     await trio.sleep(SCHEDULING_GRANULARITY)
                 else:
                     try:
-                        block_id, fec_data = next(packet_generator)
+                        block_id, fec_data = next(repair_packet_generator)  # prioritize repair over source packets
+                        if not fec_data:
+                            block_id, fec_data = next(packet_generator)
                     except StopIteration:
                         break  # all source packets have been sent
                     else:
@@ -331,13 +399,15 @@ class ServerSideConnection(Connection):
         else:
             logger.warning('Ranges [%d:%d) and [%d:%d) have opposing direction',
                            self.block_range_start, self.block_range_end, block_range_start, block_range_end)
-        logger.debug('Set new range [%d, %d)', self.block_range_start, self.block_range_end)
+        logger.debug('Set range [%d, %d)', self.block_range_start, self.block_range_end)
 
     async def handle_request_resource(self, packet):
         if self.resource_id != packet.resource_id:
             await self.send(Error(ErrorCode.RESOURCE_NOT_FOUND))
             self.shutdown()
             return
+
+        logger.debug('Received keep alive')
 
         self.keep_alive_received_at = Timestamp.now()
         self.sending_rate = packet.sending_rate
@@ -355,7 +425,12 @@ class ServerSideConnection(Connection):
         self.acknowledged_blocks.add(packet.block_id)
 
     def handle_nack_block(self, packet):
-        pass
+        if packet.block_id not in self.pending_nacks:
+            logger.debug('Received NACK %d', packet.block_id)
+            priority = -packet.block_id if self.block_range_reversed else packet.block_id
+            repair_count = min(2, self.encoders[packet.block_id].minimum_packet_count - packet.received_packets)
+            heappush(self.nack_heap, (priority, PendingNack(block_id=packet.block_id, repair_count=repair_count)))
+            self.pending_nacks.add(packet.block_id)
 
     def handle_shrink_range(self, packet):
         self.shrink_range(packet.block_range_start, packet.block_range_end)
