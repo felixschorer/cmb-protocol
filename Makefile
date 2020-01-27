@@ -11,7 +11,7 @@ install_rustup: .make.install_rustup
 create_virtualenv: .make.create_virtualenv
 
 install_dependencies: create_virtualenv requirements.txt
-	source venv/bin/activate && python3 -m pip3 install -r requirements.txt
+	source venv/bin/activate && python3 -m pip install -r requirements.txt
 
 compile_raptorq: install_rustup create_virtualenv install_dependencies $(shell find raptorq/src -type f) raptorq/Cargo.toml
 	source venv/bin/activate && maturin develop --release
