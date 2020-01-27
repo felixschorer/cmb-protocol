@@ -29,7 +29,7 @@ clean:
 .make.install_rustup:
 	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 	cd raptorq
-	. ~/.bashrc && rustup install nightly && rustup override set nightly
+	exec bash && rustup install nightly && rustup override set nightly
 	touch .make.install_rustup
 
 .make.create_virtualenv: install_python
