@@ -9,7 +9,7 @@ create_virtualenv: .make.create_virtualenv
 install_dependencies: .make.create_virtualenv requirements.txt
 	. venv/bin/activate && python3 -m pip install -r requirements.txt
 
-compile_raptorq: .make.install_rustup .make.create_virtualenv .make.install_dependencies $(shell find raptorq/src -type f) raptorq/Cargo.toml
+compile_raptorq: .make.install_rustup .make.create_virtualenv install_dependencies $(shell find raptorq/src -type f) raptorq/Cargo.toml
 	. venv/bin/activate && cd raptorq && maturin develop --release
 
 install: install_dependencies compile_raptorq
