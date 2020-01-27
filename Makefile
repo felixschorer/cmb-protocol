@@ -1,3 +1,5 @@
+.PHONY: patch_ubuntu install_python install_rustup create_virtualenv install_dependencies compile_raptorq install clean
+
 patch_ubuntu: /etc/apt/sources.list
 	sudo sed -i 's/de.archive/old-releases/g' /etc/apt/sources.list
 	sudo sed -i 's/security/old-releases/g' /etc/apt/sources.list
@@ -17,10 +19,10 @@ compile_raptorq: install_rustup create_virtualenv install_dependencies $(shell f
 install: install_dependencies compile_raptorq
 
 clean:
-    rm .make.*
+	rm .make.*
 
 .make.install_python: patch_ubuntu
-    sudo apt-get update
+	sudo apt-get update
 	sudo apt-get install python3 python3-dev python3-pip
 	touch .make.install_python
 
