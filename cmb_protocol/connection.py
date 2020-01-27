@@ -1,4 +1,6 @@
 from abc import ABC
+from collections import namedtuple
+from heapq import heappush, heappop
 
 import trio
 from recordclass import recordclass
@@ -55,7 +57,7 @@ class Connection(ABC):
         await self._send(packet)
 
 
-BlockMetadata = recordclass('NotAcknowledgedBlock', ['packets_received', 'decoder', 'nack_timestamp'])
+BlockMetadata = recordclass('BlockMetadata', ['packets_received', 'decoder', 'nack_timestamp'])
 
 
 class ClientSideConnection(Connection):
@@ -137,6 +139,7 @@ class ClientSideConnection(Connection):
                 previous_block_metadata.nack_timestamp = Timestamp.now()
                 nursery.start_soon(self.send, NackBlock(block_id=previous_block_id,
                                                         received_packets=previous_block_metadata.packets_received))
+                logger.debug('Sent NACK %d', previous_block_id)
 
     def advance_head_of_line(self, block_id):
         if block_id > self.block_range_start if self.reverse else block_id < self.block_range_start:
@@ -184,7 +187,6 @@ class ClientSideConnection(Connection):
     async def handle_data(self, packet):
         rtt_sample = Timestamp.now() - packet.timestamp - packet.delay
         self.rtt = rtt_sample if self.rtt is None else 0.9 * self.rtt + 0.1 * rtt_sample
-        logger.debug('Measured RTT: %f', self.rtt)
 
         if packet.block_id in self.active_block_range and packet.block_id not in self.acknowledged_blocks:
             if packet.block_id not in self.not_acknowledged_blocks:
@@ -211,6 +213,7 @@ class ClientSideConnection(Connection):
                 self.acknowledged_blocks[packet.block_id] = Timestamp.now()
 
                 await self.send(AckBlock(block_id=packet.block_id))
+                logger.debug('Sent ACK %d', packet.block_id)
                 await self.write_block(packet.block_id, decoded_block)
 
                 if self.block_range_start == self.block_range_end:
@@ -221,6 +224,7 @@ class ClientSideConnection(Connection):
             # acknowledgement got lost
             self.acknowledged_blocks[packet.block_id] = Timestamp.now()
             await self.send(AckBlock(block_id=packet.block_id))
+            logger.debug('Sent duplicate ACK %d', packet.block_id)
 
     def handle_error(self, packet):
         if ErrorCode.RESOURCE_NOT_FOUND == packet.error_code:
@@ -248,8 +252,10 @@ class ClientSideConnection(Connection):
             self.shutdown()
 
 
-class ServerSideConnection(Connection):
+PendingNack = namedtuple('PendingNack', ['block_id', 'repair_count'])
 
+
+class ServerSideConnection(Connection):
     def __init__(self, shutdown, spawn, send, resource_id, encoders):
         """
         :param shutdown:     cf. Connection
@@ -271,6 +277,9 @@ class ServerSideConnection(Connection):
         self.recent_receiver_timestamp = None
 
         self.keep_alive_received_at = None
+
+        self.nack_heap = []  # defines nack processing order
+        self.pending_nacks = set()  # block_id
 
     @property
     def block_range_reversed(self):
@@ -303,6 +312,9 @@ class ServerSideConnection(Connection):
 
         # preemptive repair phase, send repair packets is round robin until everything has been acknowledged
         logger.debug('Exhausted source packets, starting preemptive repair phase')
+        yield from self.generate_preemptive_repair_packets()
+
+    def generate_preemptive_repair_packets(self):
         while True:
             repair_packets_generated = 0
             for block_id in self.active_block_range:
@@ -320,9 +332,28 @@ class ServerSideConnection(Connection):
             else:
                 logger.debug('Generated %d repair packets', repair_packets_generated)
 
+    def generate_repair_packets(self):
+        while True:
+            if len(self.nack_heap) > 0:
+                _, (block_id, repair_count) = self.nack_heap[0]
+
+                for _ in range(repair_count):
+                    # check if we have received a stop signal in the meantime
+                    if block_id in self.acknowledged_blocks or block_id not in self.active_block_range:
+                        break
+
+                    yield self.generate_next_repair_packet(block_id)
+
+                heappop(self.nack_heap)
+                self.pending_nacks.remove(block_id)
+                logger.debug('Sent repair %d', block_id)
+            else:
+                yield None, None
+
     async def send_blocks(self):
         try:
             packet_generator = self.generate_packets()
+            repair_packet_generator = self.generate_repair_packets()
             sequence_number = SequenceNumber(0)
             send_time = Timestamp.now()
             while True:
@@ -334,7 +365,9 @@ class ServerSideConnection(Connection):
                     await trio.sleep(SCHEDULING_GRANULARITY)
                 else:
                     try:
-                        block_id, fec_data = next(packet_generator)
+                        block_id, fec_data = next(repair_packet_generator)  # prioritize repair over source packets
+                        if not fec_data:
+                            block_id, fec_data = next(packet_generator)
                     except StopIteration:
                         break  # all source packets have been sent
                     else:
@@ -366,13 +399,15 @@ class ServerSideConnection(Connection):
         else:
             logger.warning('Ranges [%d:%d) and [%d:%d) have opposing direction',
                            self.block_range_start, self.block_range_end, block_range_start, block_range_end)
-        logger.debug('Set new range [%d, %d)', self.block_range_start, self.block_range_end)
+        logger.debug('Set range [%d, %d)', self.block_range_start, self.block_range_end)
 
     async def handle_request_resource(self, packet):
         if self.resource_id != packet.resource_id:
             await self.send(Error(ErrorCode.RESOURCE_NOT_FOUND))
             self.shutdown()
             return
+
+        logger.debug('Received keep alive')
 
         self.keep_alive_received_at = Timestamp.now()
         self.sending_rate = packet.sending_rate
@@ -390,7 +425,12 @@ class ServerSideConnection(Connection):
         self.acknowledged_blocks.add(packet.block_id)
 
     def handle_nack_block(self, packet):
-        logger.debug('Received NACK')
+        if packet.block_id not in self.pending_nacks:
+            logger.debug('Received NACK %d', packet.block_id)
+            priority = -packet.block_id if self.block_range_reversed else packet.block_id
+            repair_count = min(2, self.encoders[packet.block_id].minimum_packet_count - packet.received_packets)
+            heappush(self.nack_heap, (priority, PendingNack(block_id=packet.block_id, repair_count=repair_count)))
+            self.pending_nacks.add(packet.block_id)
 
     def handle_shrink_range(self, packet):
         self.shrink_range(packet.block_range_start, packet.block_range_end)
