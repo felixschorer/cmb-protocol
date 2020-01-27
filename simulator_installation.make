@@ -10,14 +10,14 @@ install_rustup:
 	rustup override set nightly
 
 create_virtual_env: install_python
-	pip3 install virtualenv
+	python3 -m pip3 install virtualenv
 	python3 -m virtualenv venv
 
 activate_virtual_env: create_virtual_env
 	source venv/bin/activate
 
 install_dependencies: create_virtual_env activate_virtual_env
-	pip3 install -r requirements.txt
+	python3 -m pip3 install -r requirements.txt
 
 compile_native_raptorq_module: install_rustup activate_virtual_env
 	maturin develop --release
