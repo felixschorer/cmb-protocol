@@ -2,7 +2,7 @@ import struct
 from functools import wraps
 from ipaddress import ip_address, IPv6Address
 
-from cmb_protocol.constants import RESOURCE_ID_STRUCT_FORMAT
+RESOURCE_ID_STRUCT_FORMAT = '!16sQ'
 
 
 def pack_uint48(uint48):
@@ -50,6 +50,10 @@ def once(func):
 
 def format_resource_id(resource_id):
     return struct.pack(RESOURCE_ID_STRUCT_FORMAT, *resource_id).hex()
+
+
+def parse_resource_id(hex_string):
+    return struct.unpack(RESOURCE_ID_STRUCT_FORMAT, bytes.fromhex(hex_string))
 
 
 def format_address(address):

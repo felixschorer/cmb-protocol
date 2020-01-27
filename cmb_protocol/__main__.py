@@ -1,8 +1,10 @@
-import struct
 from argparse import ArgumentParser, FileType
 from ipaddress import ip_address
-from cmb_protocol.constants import DEFAULT_PORT, DEFAULT_IP_ADDR, RESOURCE_ID_STRUCT_FORMAT
-from cmb_protocol import log_util
+
+from cmb_protocol.client import ConnectionConfig
+from cmb_protocol.constants import DEFAULT_PORT, DEFAULT_IP_ADDR, DEFAULT_SENDING_RATE
+from cmb_protocol.helpers import parse_resource_id
+from cmb_protocol import log_util, client, server
 
 logger = log_util.get_logger(__file__)
 
@@ -72,8 +74,8 @@ def main():
             exit(1)
 
     for port in ports:
-        if port < 2**10 or 2**16 - 1 < port:
-            logger.error('%d is not within the valid port range [%d, %d]', port, 2**10, 2**16 - 1)
+        if port < 2 ** 10 or 2 ** 16 - 1 < port:
+            logger.error('%d is not within the valid port range [%d, %d]', port, 2 ** 10, 2 ** 16 - 1)
             exit(1)
 
     addresses = list(zip(ip_addrs, ports))
@@ -83,22 +85,22 @@ def main():
             logger.error('Expected at most 2 addresses, %d were given', len(addresses))
             exit(1)
 
-        server_addresses = {reverse: server_address for reverse, server_address in zip([False, True], addresses)}
+        connection_configs = [
+            ConnectionConfig(address=server_address, sending_rate=DEFAULT_SENDING_RATE, reverse=reverse) for
+            reverse, server_address in zip([False, True], addresses)]
 
         resource_id, output = getattr(args, RESOURCE_ID), getattr(args, OUTPUT)
         try:
-            parsed_resource_id = struct.unpack(RESOURCE_ID_STRUCT_FORMAT, bytes.fromhex(resource_id))
+            parsed_resource_id = parse_resource_id(resource_id)
         except ValueError:
             logger.error('%s is not a valid resource id', resource_id)
             exit(1)
         else:
-            from cmb_protocol.client import run
-            run(resource_id=parsed_resource_id, file_writer=output, server_addresses=server_addresses)
+            client.run(resource_id=parsed_resource_id, file_writer=output, connection_configs=connection_configs)
 
     elif mode == SERVER:
         file_type = getattr(args, FILE)
-        from cmb_protocol.server import run
-        run(file_type, addresses)
+        server.run(file_type, addresses)
 
 
 if __name__ == '__main__':

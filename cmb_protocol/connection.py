@@ -8,7 +8,7 @@ from recordclass import recordclass
 from cmb_protocol import log_util
 from cmb_protocol.coding import Decoder, RAPTORQ_HEADER_SIZE
 from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_of_blocks, calculate_block_size, \
-    SENDING_RATE, HEARTBEAT_INTERVAL, SCHEDULING_GRANULARITY
+    HEARTBEAT_INTERVAL, SCHEDULING_GRANULARITY
 from cmb_protocol.helpers import is_reversed, directed_range, format_resource_id
 from cmb_protocol.log_util import get_logging_context
 from cmb_protocol.packets import RequestResource, AckBlock, NackBlock, ShrinkRange, Data, Error, ErrorCode, Packet
@@ -61,17 +61,19 @@ BlockMetadata = recordclass('BlockMetadata', ['packets_received', 'decoder', 'na
 
 
 class ClientSideConnection(Connection):
-    def __init__(self, shutdown, spawn, send, write_block, resource_id, reverse):
+    def __init__(self, shutdown, spawn, send, write_block, resource_id, sending_rate, reverse):
         """
         :param shutdown:     cf. Connection
         :param spawn:        cf. Connection
         :param send:         cf. Connection
         :param write_block:  async function for writing a block to the output
         :param resource_id:  the id of the resource
+        :param sending_rate: sending rate in bps
         :param reverse:      bool whether this connection should request the blocks in reverse order
         """
         super().__init__(shutdown, spawn, send)
         self.write_block = write_block
+        self.sending_rate = sending_rate
         self.resource_id = resource_id
         self.reverse = reverse
 
@@ -86,8 +88,6 @@ class ClientSideConnection(Connection):
 
         self.head_of_line_blocked = set()  # block_ids
         self.opposite_head_of_line_blocked = set()  # block_ids
-
-        self.sending_rate = SENDING_RATE  # TODO
 
         self.rtt = None
         self.cancel_scope = None
