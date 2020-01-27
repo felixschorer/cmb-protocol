@@ -29,7 +29,7 @@ clean:
 .make.install_rustup:
 	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 	cd raptorq
-	chsh -s /bin/bash && source $HOME/.cargo/env && sudo . ~/.bash_profile
+	PATH=$PATH:$HOME/.cargo/bin
 	rustup install nightly
 	rustup override set nightly
 	touch .make.install_rustup
