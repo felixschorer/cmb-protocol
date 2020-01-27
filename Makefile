@@ -34,6 +34,6 @@ clean:
 	touch .make.install_rustup
 
 .make.create_virtualenv: install_python
-	python3 -m pip3 install virtualenv
+	python3 -m pip install virtualenv
 	python3 -m virtualenv venv
 	touch .make.create_virtualenv
