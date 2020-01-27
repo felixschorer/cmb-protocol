@@ -16,8 +16,8 @@ create_virtual_env: install_python
 	python3 -m pip3 install virtualenv
 	python3 -m virtualenv venv
 
-install_dependencies: create_virtual_env
+install_dependencies: create_virtual_env requirements.txt
 	source venv/bin/activate && python3 -m pip3 install -r requirements.txt
 
-compile_native_raptorq_module: install_rustup create_virtual_env
+compile_native_raptorq_module: install_rustup create_virtual_env requirements.txt
 	source venv/bin/activate && maturin develop --release
