@@ -1,8 +1,10 @@
-import struct
 from argparse import ArgumentParser, FileType
 from ipaddress import ip_address
-from cmb_protocol.constants import DEFAULT_PORT, DEFAULT_IP_ADDR, RESOURCE_ID_STRUCT_FORMAT
-from cmb_protocol import log_util
+
+from cmb_protocol.client import ConnectionConfig
+from cmb_protocol.constants import DEFAULT_PORT, DEFAULT_IP_ADDR, DEFAULT_SENDING_RATE
+from cmb_protocol.helpers import parse_resource_id
+from cmb_protocol import log_util, client, server
 
 logger = log_util.get_logger(__file__)
 
@@ -12,6 +14,7 @@ SERVER = 'server'
 VERBOSE = 'verbose'
 IP_ADDR = 'ip_addr'
 PORT = 'port'
+SENDING_RATE = 'sending_rate'
 RESOURCE_ID = 'resource_id'
 OUTPUT = 'output'
 FILE = 'file'
@@ -33,6 +36,7 @@ def parse_args():
     client_parser = subparsers.add_parser(CLIENT, parents=[address_parser, loglevel_parser])
     client_parser.add_argument(RESOURCE_ID, type=str)
     client_parser.add_argument(OUTPUT, type=FileType('wb'))
+    client_parser.add_argument('-r', '--{}'.format(SENDING_RATE), action='append', type=int, default=[])
 
     server_parser = subparsers.add_parser(SERVER, parents=[address_parser, loglevel_parser])
     server_parser.add_argument(FILE, type=FileType('rb'))
@@ -60,7 +64,7 @@ def main():
         ports *= len(ip_addrs)
 
     if len(ip_addrs) != len(ports):
-        logger.error('Expected the number of addresses to match the number of port, ',
+        logger.error('Expected the number of addresses to match the number of ports, ',
                      'or the number of addresses or ports to be 1')
         exit(1)
 
@@ -72,8 +76,8 @@ def main():
             exit(1)
 
     for port in ports:
-        if port < 2**10 or 2**16 - 1 < port:
-            logger.error('%d is not within the valid port range [%d, %d]', port, 2**10, 2**16 - 1)
+        if port < 2 ** 10 or 2 ** 16 - 1 < port:
+            logger.error('%d is not within the valid port range [%d, %d]', port, 2 ** 10, 2 ** 16 - 1)
             exit(1)
 
     addresses = list(zip(ip_addrs, ports))
@@ -83,22 +87,34 @@ def main():
             logger.error('Expected at most 2 addresses, %d were given', len(addresses))
             exit(1)
 
-        server_addresses = {reverse: server_address for reverse, server_address in zip([False, True], addresses)}
+        sending_rates = getattr(args, SENDING_RATE)
+        if len(sending_rates) == 0:
+            sending_rates.append(DEFAULT_SENDING_RATE)
+
+        if len(sending_rates) == 1:
+            sending_rates *= len(addresses)
+
+        if len(sending_rates) != len(addresses):
+            logger.error('Expected the number of addresses to match the number of sending rates, ',
+                         'or the number of sending rates to be 1')
+            exit(1)
+
+        connection_configs = [
+            ConnectionConfig(address=server_address, sending_rate=sending_rate, reverse=reverse) for
+            reverse, server_address, sending_rate in zip([False, True], addresses, sending_rates)]
 
         resource_id, output = getattr(args, RESOURCE_ID), getattr(args, OUTPUT)
         try:
-            parsed_resource_id = struct.unpack(RESOURCE_ID_STRUCT_FORMAT, bytes.fromhex(resource_id))
+            parsed_resource_id = parse_resource_id(resource_id)
         except ValueError:
             logger.error('%s is not a valid resource id', resource_id)
             exit(1)
         else:
-            from cmb_protocol.client import run
-            run(resource_id=parsed_resource_id, file_writer=output, server_addresses=server_addresses)
+            client.run(resource_id=parsed_resource_id, file_writer=output, connection_configs=connection_configs)
 
     elif mode == SERVER:
         file_type = getattr(args, FILE)
-        from cmb_protocol.server import run
-        run(file_type, addresses)
+        server.run(file_type, addresses)
 
 
 if __name__ == '__main__':
