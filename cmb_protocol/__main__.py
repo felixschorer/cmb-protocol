@@ -14,6 +14,7 @@ SERVER = 'server'
 VERBOSE = 'verbose'
 IP_ADDR = 'ip_addr'
 PORT = 'port'
+SENDING_RATE = 'sending_rate'
 RESOURCE_ID = 'resource_id'
 OUTPUT = 'output'
 FILE = 'file'
@@ -35,6 +36,7 @@ def parse_args():
     client_parser = subparsers.add_parser(CLIENT, parents=[address_parser, loglevel_parser])
     client_parser.add_argument(RESOURCE_ID, type=str)
     client_parser.add_argument(OUTPUT, type=FileType('wb'))
+    client_parser.add_argument('-r', '--{}'.format(SENDING_RATE), action='append', type=int, default=[])
 
     server_parser = subparsers.add_parser(SERVER, parents=[address_parser, loglevel_parser])
     server_parser.add_argument(FILE, type=FileType('rb'))
@@ -62,7 +64,7 @@ def main():
         ports *= len(ip_addrs)
 
     if len(ip_addrs) != len(ports):
-        logger.error('Expected the number of addresses to match the number of port, ',
+        logger.error('Expected the number of addresses to match the number of ports, ',
                      'or the number of addresses or ports to be 1')
         exit(1)
 
@@ -85,9 +87,21 @@ def main():
             logger.error('Expected at most 2 addresses, %d were given', len(addresses))
             exit(1)
 
+        sending_rates = getattr(args, SENDING_RATE)
+        if len(sending_rates) == 0:
+            sending_rates.append(DEFAULT_SENDING_RATE)
+
+        if len(sending_rates) == 1:
+            sending_rates *= len(addresses)
+
+        if len(sending_rates) != len(addresses):
+            logger.error('Expected the number of addresses to match the number of sending rates, ',
+                         'or the number of sending rates to be 1')
+            exit(1)
+
         connection_configs = [
-            ConnectionConfig(address=server_address, sending_rate=DEFAULT_SENDING_RATE, reverse=reverse) for
-            reverse, server_address in zip([False, True], addresses)]
+            ConnectionConfig(address=server_address, sending_rate=sending_rate, reverse=reverse) for
+            reverse, server_address, sending_rate in zip([False, True], addresses, sending_rates)]
 
         resource_id, output = getattr(args, RESOURCE_ID), getattr(args, OUTPUT)
         try:

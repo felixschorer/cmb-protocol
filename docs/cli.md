@@ -1,7 +1,8 @@
 ## client
 
 ```
-usage: __main__.py client [-h] [-a IP_ADDR] [-p PORT] [-v] resource_id output
+usage: __main__.py client [-h] [-a IP_ADDR] [-p PORT] [-v] [-r SENDING_RATE]
+                          resource_id output
 
 positional arguments:
   resource_id
@@ -12,6 +13,7 @@ optional arguments:
   -a IP_ADDR, --ip_addr IP_ADDR
   -p PORT, --port PORT
   -v, --verbose
+  -r SENDING_RATE, --sending_rate SENDING_RATE
 ```
 
 ## server
