@@ -3,7 +3,6 @@ from abc import ABCMeta, ABC, abstractmethod
 from enum import unique, Enum, IntEnum
 
 from cmb_protocol.helpers import unpack_uint48, pack_uint48
-from cmb_protocol.sequence_number import SequenceNumber
 from cmb_protocol.timestamp import Timestamp
 
 
@@ -101,38 +100,35 @@ class RequestResource(Packet):
 
 
 class Data(Packet):
-    __slots__ = 'block_id', 'timestamp', 'delay', 'sequence_number', 'fec_data'
+    __slots__ = 'block_id', 'timestamp', 'delay', 'fec_data'
 
     _packet_type_ = 0xcb01
 
-    __format = '!6s3sH3s'
+    __format = '!6s1s3sH'
     HEADER_SIZE = struct.calcsize(__format)
 
-    def __init__(self, block_id, timestamp, delay, sequence_number, fec_data):
+    def __init__(self, block_id, timestamp, delay, fec_data):
         super().__init__()
         assert isinstance(timestamp, Timestamp)
-        assert isinstance(sequence_number, SequenceNumber)
         self.block_id = block_id
         self.timestamp = timestamp
         self.delay = delay
-        self.sequence_number = sequence_number
         self.fec_data = fec_data
 
     def _serialize_fields(self):
         values = pack_uint48(self.block_id), \
+                 bytes(1), \
                  self.timestamp.to_bytes(), \
-                 int(self.delay * 1000), \
-                 self.sequence_number.to_bytes()
+                 int(self.delay * 1000)
         return struct.pack(self.__format, *values) + self.fec_data
 
     @classmethod
     def _parse_fields(cls, packet_bytes):
         header, fec_data = packet_bytes[:cls.HEADER_SIZE], packet_bytes[cls.HEADER_SIZE:]
-        block_id, timestamp, delay, sequence_number = struct.unpack(cls.__format, header)
+        block_id, reserved, timestamp, delay = struct.unpack(cls.__format, header)
         return Data(block_id=unpack_uint48(block_id),
                     timestamp=Timestamp.from_bytes(timestamp),
                     delay=delay / 1000,
-                    sequence_number=SequenceNumber.from_bytes(sequence_number),
                     fec_data=fec_data)
 
 

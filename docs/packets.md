@@ -46,11 +46,11 @@ and to regulate the rate at which the sender sends.
   0 |              0xcb01             |                                 |
     ├─────────────────────────────────┘                                 |
   4 |                             Block ID                              |
-    ├──────────────────────────────────────────────────┬────────────────┤
-  8 |                     Timestamp                    |     Delay      |
-    ├────────────────┬─────────────────────────────────┴────────────────┤
- 12 |     Delay      |                  Sequence Number                 |
-    ├────────────────┴──────────────────────────────────────────────────┤
+    ├────────────────┬──────────────────────────────────────────────────┤
+  8 |    Reserved    |                     Timestamp                    |
+    ├────────────────┴────────────────┬─────────────────────────────────┤
+ 12 |             Delay               |                                 |
+    ├─────────────────────────────────┘                                 |
  14 |                                                                   |
     ├ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ FEC Data  ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ┤
   X |                                                                   | 
@@ -60,7 +60,6 @@ and to regulate the rate at which the sender sends.
 - Timestamp: 24 bit timestamp in milliseconds starting at 0
 - Delay: 16 bit unsigned integer holding the amount of milliseconds elapsed between the receipt of the last 
   `RequstResoucre` packet at the sender and the generation of this `Data` packet.
-- Sequence Number: 24 bit sequence number
 - FEC Data: Data of the resource encoded using forward error correction
 
 ## Ack Block
