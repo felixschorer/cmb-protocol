@@ -7,13 +7,13 @@ is assumed as environment.
 ## Installation
 
 ```
-$ make compile_native_raptorq_module
-$ make install_dependencies
+$ make install
 ```
 
-The two commands above will make sure, Python 3.5 and Rust are installed. 
-For this, the Ubuntu system on which the VM is based on needs to be patched. 
-Dependencies are installed in a virtual environment.
+The command above will make sure, 
+- Python 3.5 and Rust are installed. 
+- Since the installed Ubuntu on the above mentioned VM is out of support, it is patched. 
+- Project dependencies are installed in a virtual environment.
 
 
 The compilation might fail if a 32bit version of Python is used on a 64bit machine.
