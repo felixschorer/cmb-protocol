@@ -78,7 +78,7 @@ def run(file_reader, addresses):
     encoders = dict()  # block_id -> encoder
 
     with file_reader:
-        logger.debug('Reading from %s', file_reader.name)
+        logger.info('Reading from %s', file_reader.name)
 
         # split file into blocks
         block_size = MAXIMUM_TRANSMISSION_UNIT * SYMBOLS_PER_BLOCK

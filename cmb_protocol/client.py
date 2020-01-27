@@ -1,4 +1,5 @@
 import hashlib
+import time
 from collections import namedtuple
 
 import trio
@@ -109,10 +110,18 @@ def run(resource_id, file_writer, connection_configs):
         # in case of stdout we have to use the buffer to write binary data
         file_writer = file_writer.buffer
 
-    logger.debug('Writing to %s', file_writer.name)
+    logger.info('Writing to %s', file_writer.name)
+    _, resource_length = resource_id
+    logger.info('Downloading %f Mb', resource_length / 1000 / 1000)
+    logger.info('Combined target transmission rate %f Mbit/s',
+                sum(config.sending_rate for config in connection_configs) / 1000 / 1000 * 8)
 
     with trio.MultiError.catch(log_value_error):
+        start = time.time()
         blocks = trio.run(fetch, resource_id, connection_configs)
+        elapsed = time.time() - start
+        logger.info('Took %f seconds', elapsed)
+        logger.info('Throughput %f Mbit/s', resource_length / 1000 / 1000 / elapsed * 8)
 
         with file_writer:
             for block in blocks:
