@@ -12,7 +12,6 @@ from cmb_protocol.constants import MAXIMUM_TRANSMISSION_UNIT, calculate_number_o
 from cmb_protocol.helpers import is_reversed, directed_range, format_resource_id
 from cmb_protocol.log_util import get_logging_context
 from cmb_protocol.packets import RequestResource, AckBlock, NackBlock, ShrinkRange, Data, Error, ErrorCode, Packet
-from cmb_protocol.sequence_number import SequenceNumber
 from cmb_protocol.timestamp import Timestamp
 
 
@@ -354,7 +353,6 @@ class ServerSideConnection(Connection):
         try:
             packet_generator = self.generate_packets()
             repair_packet_generator = self.generate_repair_packets()
-            sequence_number = SequenceNumber(0)
             send_time = Timestamp.now()
             while True:
                 if Timestamp.now() - self.keep_alive_received_at > 4 * HEARTBEAT_INTERVAL:
@@ -374,10 +372,8 @@ class ServerSideConnection(Connection):
                         packet = Data(block_id=block_id,
                                       timestamp=self.recent_receiver_timestamp,
                                       delay=Timestamp.now() - self.keep_alive_received_at,
-                                      sequence_number=sequence_number,
                                       fec_data=fec_data)
                         await self.send(packet)
-                        sequence_number += 1
                         send_time += SEGMENT_SIZE / self.sending_rate
         finally:
             self.shutdown()
