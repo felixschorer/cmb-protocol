@@ -197,10 +197,10 @@ class ClientSideConnection(Connection):
                 self.not_acknowledged_blocks[packet.block_id] = block_metadata
 
             block_metadata = self.not_acknowledged_blocks[packet.block_id]
-
-            # update packet counter and reset nack send timeout
             block_metadata.packets_received += 1
-            block_metadata.nack_timestamp = Timestamp.now()
+            if block_metadata.nack_timestamp is not None:
+                # reset nack send timeout
+                block_metadata.nack_timestamp = Timestamp.now()
 
             decoded_block = block_metadata.decoder.decode([packet.fec_data])
 
