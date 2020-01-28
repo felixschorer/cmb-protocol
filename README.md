@@ -27,16 +27,16 @@ $ . venv/bin/activate
 For general usage refer to the [CLI documentation](docs/cli.md).
 
 ### Basic example
-When no IP address or port is specified, the server will start listening on 127.0.0.1:9999.
+When no IP address or port is specified, the server will start listening on UDP `127.0.0.1:9999`.
 The server expects its first positional argument to be a path to a file.
 ```
 (venv) $ python3 -m cmb_protocol server ./some_file.pdf
-[INFO]	Reading from C:/Users/felix/Desktop/CMB/enhanced_tfrc.pdf
+[INFO]	Reading from /home/mininet/some_file.pdf
 [INFO]	Serving resource 9227dae20e7cbcd561f55d2a31363843000000000020df7a
 [INFO]	Started listening
 ```
 
-Similarly, the client will connect to 127.0.0.1:9999 with a sending rate of 2 Mbit/s.
+Similarly, the client will connect to UDP `127.0.0.1:9999` with a sending rate of 2 Mbit/s.
 The client expects its first positional argument to be the resource ID which is printed to the console by the server, as seen above.
 The second argument must be the destination file, e.g. `/dev/null` or `-` for stdout.
 ```
@@ -51,7 +51,7 @@ The server can listen on more than one interface.
 To specify multiple IP address and port combinations, do as follows.
 ```
 (venv) $ python3 -m cmb_protocol server -a 127.0.0.1 -p 1337 -a ::1 -p 1338 ./some_file.pdf
-[INFO]	Reading from C:/Users/felix/Desktop/CMB/enhanced_tfrc.pdf
+[INFO]	Reading from /home/mininet/some_file.pdf
 [INFO]	Serving resource 9227dae20e7cbcd561f55d2a31363843000000000020df7a
 [INFO]	Started listening
 [INFO]	Started listening
