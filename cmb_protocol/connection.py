@@ -334,7 +334,7 @@ class ServerSideConnection(Connection):
     def generate_repair_packets(self):
         while True:
             if len(self.nack_heap) > 0:
-                _, (block_id, repair_count) = self.nack_heap[0]
+                _, (block_id, repair_count) = heappop(self.nack_heap)
 
                 for _ in range(repair_count):
                     # check if we have received a stop signal in the meantime
@@ -343,7 +343,6 @@ class ServerSideConnection(Connection):
 
                     yield self.generate_next_repair_packet(block_id)
 
-                heappop(self.nack_heap)
                 self.pending_nacks.remove(block_id)
                 logger.debug('Sent repair %d', block_id)
             else:
@@ -424,7 +423,7 @@ class ServerSideConnection(Connection):
         if packet.block_id not in self.pending_nacks:
             logger.debug('Received NACK %d', packet.block_id)
             priority = -packet.block_id if self.block_range_reversed else packet.block_id
-            repair_count = min(2, self.encoders[packet.block_id].minimum_packet_count - packet.received_packets)
+            repair_count = max(2, self.encoders[packet.block_id].minimum_packet_count - packet.received_packets)
             heappush(self.nack_heap, (priority, PendingNack(block_id=packet.block_id, repair_count=repair_count)))
             self.pending_nacks.add(packet.block_id)
 
