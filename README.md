@@ -35,6 +35,8 @@ $ source venv/bin/activate
 ```
  
 ### Usage examples
+For general usage refer to the [CLI documentation](docs/cli.md).
+
 #### Basic example
 When no IP address or port is specified, the server will start listening on 127.0.0.1:9999.
 The server expects its first positional argument to be a path to a file.
