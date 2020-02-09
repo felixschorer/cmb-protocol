@@ -115,30 +115,29 @@ class ClientSideConnection(Connection):
 
     async def check_could_decode_previous(self, block_id):
         block_metadata = self.not_acknowledged_blocks[block_id]
-        async with trio.open_nursery() as nursery:
-            for previous_block_id in directed_range(self.block_range_start, block_id):
-                if previous_block_id not in self.not_acknowledged_blocks:
-                    # did decode block already, block is head of line blocked
-                    continue
+        for previous_block_id in directed_range(self.block_range_start, block_id):
+            if previous_block_id not in self.not_acknowledged_blocks:
+                # did decode block already, block is head of line blocked
+                continue
 
-                distance = abs(block_id - previous_block_id)  # if reversed, difference might be negative
-                if distance < 2 and block_metadata.packets_received < 3:
-                    # does not fulfill packet loss criteria
-                    continue
+            distance = abs(block_id - previous_block_id)  # if reversed, difference might be negative
+            if distance < 2 and block_metadata.packets_received < 3:
+                # does not fulfill packet loss criteria
+                continue
 
-                inter_packet_arrival_time = SEGMENT_SIZE / self.sending_rate
-                # add inter packet arrival time in case the sender is sending less than 1 packet every 4 RTTs
-                nack_resend_timeout = 4 * self.rtt + inter_packet_arrival_time
-                previous_block_metadata = self.not_acknowledged_blocks[previous_block_id]
-                if previous_block_metadata.nack_timestamp is not None \
-                        and Timestamp.now() - previous_block_metadata.nack_timestamp < nack_resend_timeout:
-                    # did send nack recently
-                    continue
+            inter_packet_arrival_time = SEGMENT_SIZE / self.sending_rate
+            # add inter packet arrival time in case the sender is sending less than 1 packet every 4 RTTs
+            nack_resend_timeout = 4 * self.rtt + inter_packet_arrival_time
+            previous_block_metadata = self.not_acknowledged_blocks[previous_block_id]
+            if previous_block_metadata.nack_timestamp is not None \
+                    and Timestamp.now() - previous_block_metadata.nack_timestamp < nack_resend_timeout:
+                # did send nack recently
+                continue
 
-                previous_block_metadata.nack_timestamp = Timestamp.now()
-                nursery.start_soon(self.send, NackBlock(block_id=previous_block_id,
-                                                        received_packets=previous_block_metadata.packets_received))
-                logger.debug('Sent NACK %d', previous_block_id)
+            previous_block_metadata.nack_timestamp = Timestamp.now()
+            await self.send(NackBlock(block_id=previous_block_id,
+                                      received_packets=previous_block_metadata.packets_received))
+            logger.debug('Sent NACK %d', previous_block_id)
 
     def advance_head_of_line(self, block_id):
         if block_id > self.block_range_start if self.reverse else block_id < self.block_range_start:

@@ -121,7 +121,7 @@ def run(resource_id, file_writer, connection_configs):
         blocks = trio.run(fetch, resource_id, connection_configs)
         elapsed = time.time() - start
         logger.info('Took %f seconds', elapsed)
-        logger.info('Throughput %f Mbit/s', resource_length / 1000 / 1000 / elapsed * 8)
+        logger.info('Good put %f Mbit/s', resource_length / 1000 / 1000 / elapsed * 8)
 
         with file_writer:
             for block in blocks:

@@ -4,6 +4,8 @@ For the following, the mininet-based virtual machine from
 [http://home.in.tum.de/~tonetto/mininet.ova](http://home.in.tum.de/~tonetto/mininet.ova) 
 is assumed as environment.
 
+**This protocol is not suited for file transfers over real networks as it lacks congestion control!**
+
 ## Installation
 
 ```
